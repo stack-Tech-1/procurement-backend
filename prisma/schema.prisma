@@ -1,8 +1,6 @@
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "debian-openssl-3.0.x"]  // for render
+  provider = "prisma-client-js"
 }
-
 
 datasource db {
   provider = "postgresql"
@@ -41,48 +39,142 @@ model Role {
 }
 
 model Vendor {
-  id                 Int                 @id @default(autoincrement())
-  code               String?             @unique
-  name               String
-  contactName        String?
-  contactEmail       String?
-  contactPhone       String?
-  address            String?
-  country            String?
-  website            String?
-  status             VendorStatus        @default(NEW)
+  id           Int              @id @default(autoincrement())
+  code         String?          @unique
+  name         String
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  status       VendorStatus     @default(NEW)
+  address      String?
+  country      String?
+  vendorType          String?          // e.g. "Contractor", "Supplier"
+  mainCategory        String?
+  subCategory         String?
+  businessType        String?
+  licenseNumber       String?
+  yearsInBusiness     Int?
+  gosiEmployeeCount   Int?
+  chamberClass        String?
+  chamberRegion       String?
+  crNumber            String?          @unique
+  website             String?
+  technicalContact    String?
+  financialContact    String?
+  projectExperience   VendorProjectExperience[]
+  reviewNotes         String?
+  reviewStatus        String?          // optional field to store evaluation status
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  materials    CSI_Material[]   @relation("CSI_MaterialToVendor")
+  contracts    Contract[]
+  priceEntries PriceEntry[]
+  submissions  RFQSubmission[]
+  users        User[]
+  documents    VendorDocument[]
+  categories   VendorCategory[] @relation("VendorToVendorCategory")
+  qualifications VendorQualification?
+  proposals       Proposal[]
+}
 
-  // Business Information
-  vendorType         String?             // e.g., Contractor, Supplier
-  mainCategory       String?
-  subCategory        String?
-  businessType       String?
-  licenseNumber      String?
-  yearsInBusiness    Int?
-  gosiEmployeeCount  Int?
-  chamberClass       String?
-  chamberRegion      String?
-  crNumber           String?             @unique
-  bankIBAN           String?
+model VendorQualification {
+  id                Int      @id @default(autoincrement())
+  vendorId          Int      @unique 
+  companyName       String
+  vendorType        String
+  mainCategory      String
+  productsServices  String
+  licenseNumber     String?
+  yearsInBusiness   Int?
+  contactFirstName  String
+  contactLastName   String
+  phoneNumber       String
+  email             String
+  address           String
+  website           String?
+  companyProfileUrl String?
 
-  // Review
-  reviewNotes        String?
-  reviewStatus       String?
+  // Document checklist
+  warrantyCert      String?
+  orgChart          String?
+  sasoSaberCert     String?
+  hsePlan           String?
+  qualityPlan       String?
+  isoCert           String?
+  commercialReg     String?
+  zakatCert         String?
+  prevWorkDocs      String?
+  technicalFile     String?
+  financialFile     String?
 
-  // Relations
-  materials          CSI_Material[]      @relation("CSI_MaterialToVendor")
-  contracts          Contract[]
-  priceEntries       PriceEntry[]
-  submissions        RFQSubmission[]
-  users              User[]
-  documents          VendorDocument[]
-  categories         VendorCategory[]    @relation("VendorToVendorCategory")
-  qualifications     VendorQualification?
-  proposals          Proposal[]
-  projectExperience  VendorProjectExperience[]
+  // Company overview
+  latestProjectValue  Float?
+  employeesUnderGOSI  Int?
+  projectsCompleted   Int?
+  yearFounded         Int?
+  bankIBAN            String?
+  statusWithKRE       String?
 
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+}
+
+model Proposal {
+  id             Int       @id @default(autoincrement())
+  vendorId       Int
+  title          String
+  details        String?
+  status         ProposalStatus @default(PENDING)
+  fileUrl        String?
+  submissionDate DateTime  @default(now())
+  reviewNotes    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+}
+
+enum ProposalStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+
+model VendorProjectExperience {
+  id               Int      @id @default(autoincrement())
+  vendorId         Int
+  projectName      String
+  clientName       String
+  contractValue    Float
+  startDate        DateTime?
+  endDate          DateTime?
+  scopeDescription String?
+  referenceContact String?
+  completionFile   String?  // URL
+  vendor           Vendor   @relation(fields: [vendorId], references: [id])
+}
+
+model VendorCategory {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  vendors   Vendor[] @relation("VendorToVendorCategory")
+}
+
+model VendorDocument {
+  id         Int       @id @default(autoincrement())
+  vendorId   Int
+  docType    String
+  url        String
+  fileName   String
+  expiryDate DateTime?
+  uploadedAt DateTime  @default(now())
+  vendor     Vendor    @relation(fields: [vendorId], references: [id])
 }
 
 model CSI_Material {
