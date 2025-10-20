@@ -41,43 +41,48 @@ model Role {
 }
 
 model Vendor {
-  id           Int              @id @default(autoincrement())
-  code         String?          @unique
-  name         String
-  contactName  String?
-  contactEmail String?
-  contactPhone String?
-  status       VendorStatus     @default(NEW)
-  address      String?
-  country      String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  materials    CSI_Material[]   @relation("CSI_MaterialToVendor")
-  contracts    Contract[]
-  priceEntries PriceEntry[]
-  submissions  RFQSubmission[]
-  users        User[]
-  documents    VendorDocument[]
-  categories   VendorCategory[] @relation("VendorToVendorCategory")
-}
+  id                 Int                 @id @default(autoincrement())
+  code               String?             @unique
+  name               String
+  contactName        String?
+  contactEmail       String?
+  contactPhone       String?
+  address            String?
+  country            String?
+  website            String?
+  status             VendorStatus        @default(NEW)
 
-model VendorCategory {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  vendors   Vendor[] @relation("VendorToVendorCategory")
-}
+  // Business Information
+  vendorType         String?             // e.g., Contractor, Supplier
+  mainCategory       String?
+  subCategory        String?
+  businessType       String?
+  licenseNumber      String?
+  yearsInBusiness    Int?
+  gosiEmployeeCount  Int?
+  chamberClass       String?
+  chamberRegion      String?
+  crNumber           String?             @unique
+  bankIBAN           String?
 
-model VendorDocument {
-  id         Int       @id @default(autoincrement())
-  vendorId   Int
-  docType    String
-  url        String
-  fileName   String
-  expiryDate DateTime?
-  uploadedAt DateTime  @default(now())
-  vendor     Vendor    @relation(fields: [vendorId], references: [id])
+  // Review
+  reviewNotes        String?
+  reviewStatus       String?
+
+  // Relations
+  materials          CSI_Material[]      @relation("CSI_MaterialToVendor")
+  contracts          Contract[]
+  priceEntries       PriceEntry[]
+  submissions        RFQSubmission[]
+  users              User[]
+  documents          VendorDocument[]
+  categories         VendorCategory[]    @relation("VendorToVendorCategory")
+  qualifications     VendorQualification?
+  proposals          Proposal[]
+  projectExperience  VendorProjectExperience[]
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 }
 
 model CSI_Material {
