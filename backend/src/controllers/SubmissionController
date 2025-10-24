@@ -1,0 +1,43 @@
+// backend/src/controllers/SubmissionController.js
+
+export const approveSubmission = async (req, res) => {
+    try {
+        const submissionId = req.params.id;
+        const { notes } = req.body; // notes is optional for approval
+        const reviewerId = req.user.id; 
+
+        // 1. Update the submission status to 'APPROVED' in the database
+        // 2. Save the reviewerId and any optional notes
+        // 3. (Optional but recommended) Trigger a notification/email to the vendor
+        
+        // ... database update logic ...
+
+        return res.status(200).json({ message: 'Submission approved successfully' });
+    } catch (error) {
+        console.error("Error in approveSubmission:", error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
+
+export const rejectSubmission = async (req, res) => {
+    try {
+        const submissionId = req.params.id;
+        const { notes } = req.body; 
+        const reviewerId = req.user.id; 
+
+        if (!notes || notes.trim() === '') {
+            return res.status(400).json({ message: 'Rejection requires reviewer notes.' });
+        }
+
+        // 1. Update the submission status to 'REJECTED'
+        // 2. Save the reviewerId and the required rejection notes
+        // 3. (Optional but recommended) Trigger a notification/email to the vendor
+        
+        // ... database update logic ...
+
+        return res.status(200).json({ message: 'Submission rejected successfully' });
+    } catch (error) {
+        console.error("Error in rejectSubmission:", error);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
+};
