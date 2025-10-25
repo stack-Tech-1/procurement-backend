@@ -21,12 +21,28 @@ import { startExpiryCheckJob } from "./jobs/expiryCheckJob.js";
 dotenv.config();
 const app = express();
 
-app.use(cors({
-  origin: ["http://localhost:3000"], // your frontend's dev URL
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-}));
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://main.dwotf13xzdq3t.amplifyapp.com",
+  "https://erp.yourdomain.com"
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
+
 
 
 app.use(express.json());
