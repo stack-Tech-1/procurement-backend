@@ -143,13 +143,6 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
 });
 
 
-
-
-
-
-
-
-
 /**
  * POST /api/vendor/status/:id
  * Updates the status of a vendor (Approve or Reject)
@@ -239,10 +232,6 @@ router.post('/status/:vendorId', authenticateToken, authorizeProcurement, async 
 });
 
 
-
-
-
-
 /**
  * GET /api/vendor/analytics/summary
  * Returns key performance indicators (KPIs) for the dashboard.
@@ -267,29 +256,46 @@ router.get('/analytics/summary', authenticateToken, authorizeProcurement, async 
             UNDER_REVIEW: 0, 
             APPROVED: 0, 
             REJECTED: 0, 
-            NEEDS_RENEWAL: 0 // Include all possible statuses from your enum
+            NEEDS_RENEWAL: 0 
         });
 
+        // ----------------------------------------------------
+        // 3. ADD VENDOR TYPE BREAKDOWN (NEW CODE ADDED HERE)
+        // ----------------------------------------------------
+        const typeCounts = await prisma.vendor.groupBy({
+            by: ['vendorType'],
+            _count: {
+                id: true,
+            },
+            // Filter out any vendors that might be missing a type, if desired.
+            // where: { vendorType: { not: null } }
+        });
 
-        // 2. Count of vendors with Expired/Expiring Documents
+        // Format type counts into a simple key-value object
+        const vendorTypeBreakdown = typeCounts.reduce((acc, curr) => {
+            // Note: curr.vendorType might be null if your schema allows it. We'll handle 'null' as 'Unknown'.
+            const typeKey = curr.vendorType || 'Unknown'; 
+            acc[typeKey] = curr._count.id;
+            return acc;
+        }, {});
+        // ----------------------------------------------------
+
+        // 2. Count of vendors with Expired/Expiring Documents (Existing logic remains)
         const today = new Date();
         const thirtyDaysFromNow = new Date(today);
         thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
         
-        // --- FIX START: Replacing count() + distinct with findMany() + distinct + length ---
-
-        // Vendors with documents that are expired (in the past)
+        // ... (Existing logic for expiredVendors and expiringVendors remains) ...
         const expiredVendors = await prisma.vendorDocument.findMany({
             where: {
                 docType: { in: ['COMMERCIAL_REGISTRATION', 'ISO_CERTIFICATE', 'ZAKAT_CERTIFICATE', 'GOSI_CERTIFICATE'] },
-                expiryDate: { lt: today } // Less than today
+                expiryDate: { lt: today }
             },
-            distinct: ['vendorId'], // Find unique vendor IDs
-            select: { vendorId: true } // Select only the ID for efficiency
+            distinct: ['vendorId'],
+            select: { vendorId: true }
         });
         const expiredVendorsCount = expiredVendors.length;
         
-        // Vendors with documents expiring within the next 30 days
         const expiringVendors = await prisma.vendorDocument.findMany({
             where: {
                 docType: { in: ['COMMERCIAL_REGISTRATION', 'ISO_CERTIFICATE', 'ZAKAT_CERTIFICATE', 'GOSI_CERTIFICATE'] },
@@ -300,11 +306,11 @@ router.get('/analytics/summary', authenticateToken, authorizeProcurement, async 
         });
         const expiringVendorsCount = expiringVendors.length;
 
-        // --- FIX END ---
-
+        // 4. Return the complete summary, including the NEW data
         res.status(200).json({
             totalVendors: totalCount,
             statusBreakdown: statusSummary,
+            vendorTypeBreakdown: vendorTypeBreakdown, // <--- THE NEW KEY!
             expiredVendorsCount: expiredVendorsCount,
             expiringSoonVendorsCount: expiringVendorsCount,
         });
@@ -314,13 +320,5 @@ router.get('/analytics/summary', authenticateToken, authorizeProcurement, async 
         res.status(500).json({ error: 'Failed to fetch vendor analytics.' });
     }
 });
-
-
-
-
-
-
-
-
 
 export default router;
