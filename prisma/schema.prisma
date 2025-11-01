@@ -73,74 +73,80 @@ enum VendorDocumentType {
 
 // --- The Main Vendor Model (Consolidated and Enhanced) ---
 model Vendor {
-  id                  Int          @id @default(autoincrement())
-  vendorId            String?      @unique // <-- NEW: For the auto-numbered ID (e.g., KRE-V-0001)
-  name                String       // Company Legal Name
-  code                String?      @unique // Retaining old code field if needed, but 'vendorId' is the new formal ID
+  id                  Int          @id @default(autoincrement())
+  vendorId            String?      @unique // A. Vendor ID (Auto-number)
+  companyLegalName    String?       // A. Company Legal Name (Mandatory)
+  code                String?      @unique // Retaining old code field if needed
+ 
+  // --- A. Company Information ---
+  vendorType          String       // A. Vendor Type (Dropdown, Mandatory)
+  businessType        String?      // A. Business Type (Dropdown)
+  licenseNumber       String?      // A. License Number (Mandatory)
+  yearsInBusiness     Int?         // A. Years in Business (Mandatory)
+  gosiEmployeeCount   Int?         // A. GOSI Employee Count (Mandatory)
+  chamberClass        String?      // A. Chamber of Commerce Certificate (Dropdown)
+  chamberRegion       String?      // A. Chamber of Commerce Region/City
+  mainCategory        String[]     // A. Main Category (Multi-select)
+  subCategory         String?      // A. Sub-Category / Specialization
+  productsAndServices String[]     // A. Products & Services (Multi-select, Mandatory)
+  csiSpecializationId Int?         // A. CSI Specialization (Lookup to CSI_Material)
+  crNumber            String?      @unique // C. Commercial Registration Number (Mandatory)
+  
+  // --- B. Contact Information ---
+  contactPerson       String?      // B. Contact Person (Mandatory)
+  contactPhone        String?      // B. Phone Number (Mandatory)
+  contactEmail        String?      // B. Email Address (Mandatory)
+  website             String?      // B. Company Website (Optional)
+  addressStreet       String?      // B. Location: Street (Mandatory)
+  addressCity         String?      // B. Location: City (Mandatory)
+  addressRegion       String?      // B. Location: Region/State (Mandatory)
+  addressCountry      String?      // B. Location: Country (Mandatory)
+  primaryContactName  String?      // B. Primary Contact Name (Mandatory)
+  primaryContactTitle String?      // B. Primary Contact Title (Mandatory)
+  technicalContactName String?     // B. Technical Contact Name
+  technicalContactEmail String?    // B. Technical Contact Email
+  financialContactName String?     // B. Financial Contact Name
+  financialContactEmail String?    // B. Financial Contact Email
 
-  // --- Company Information (from Section 2.A) ---
-  vendorType          String       // From Dropdown: General Contractor, Installer, Vendor, etc.
-  businessType        String?      // From Dropdown: Supplier / Contractor / Consultant / Manufacturer
-  licenseNumber       String?      // Mandatory Text
-  yearsInBusiness     Int?         // Mandatory Number
-  gosiEmployeeCount   Int?         // Mandatory Number
-  chamberClass        String?      // Dropdown: First / Second / Third / etc.
-  chamberRegion       String?      // Mandatory if certificate selected
-  crNumber            String?      @unique // Commercial Registration Number (Mandatory)
-  productsAndServices String[]     // <-- NEW: Multi-select
-  csiSpecializationId Int?         // CSI Specialization (Lookup to CSI_Material)
-  
-  // --- Contact Information (from Section 2.B) ---
-  contactPerson       String?      // Mandatory: Contact Person
-  contactPhone        String?      // Mandatory: Phone Number (+966 validation)
-  contactEmail        String?      // Mandatory: Email Address
-  website             String?      // Optional: URL
-  addressStreet       String?      // Mandatory: Street
-  addressCity         String?      // Mandatory: City
-  addressRegion       String?      // Mandatory: Region/State
-  addressCountry      String?      // Mandatory: Country
-  primaryContactName  String?      // Mandatory: Primary Contact Name
-  primaryContactTitle String?      // <-- NEW: Primary Contact Title
-  technicalContact    String?      // Name + Email
-  financialContact    String?      // Name + Email
+  // --- System/Status Fields ---
+  status              VendorStatus @default(NEW)
+  kreStatus           String       @default("New")
+  reviewNotes         String?
+  reviewStatus        String?
+  lastEvaluatorId     Int?
+  score               Float?
 
-  // --- System/Status Fields (from Section 2.D) ---
-  status              VendorStatus @default(NEW)
-  kreStatus           String       @default("New") // KRE Status (New / Existing)
-  reviewNotes         String?      // Vendor Review Notes (Long Text)
-  reviewStatus        String?      // Auto-updated after evaluation
-  lastEvaluatorId     Int?         // To link to the last reviewer (optional)
-  score               Float?       // Linkage with evaluation module
-
-  // --- Relations ---
-  userId              Int          @unique
-  user                User         @relation(fields: [userId], references: [id])
-  projectExperience   VendorProjectExperience[]
-  documents           VendorDocument[]
-  categories          VendorCategory[] @relation("VendorToVendorCategory")
-  // Note: Removing 'qualifications VendorQualification?' as the model is merged
-  
-  defaultCsiMaterial  CSI_Material[] @relation("CSI_MaterialToVendor")
-  priceEntries        PriceEntry[]
-  submissions         RFQSubmission[] 
-  contracts           Contract[]  
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  // --- Relations ---
+  userId              Int          @unique
+  user                User         @relation(fields: [userId], references: [id])
+  projectExperience   VendorProjectExperience[] // A. Project Experience Table
+  documents           VendorDocument[]          // C. Document Checklist
+  categories          VendorCategory[] @relation("VendorToVendorCategory")
+  // ... (Other relations)
+  defaultCsiMaterial  CSI_Material[] @relation("CSI_MaterialToVendor")
+  priceEntries        PriceEntry[]
+  submissions         RFQSubmission[] 
+  contracts           Contract[]  
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 }
 
 // --- Enhanced VendorDocument Model (The Document Checklist) ---
 model VendorDocument {
-  id            Int                @id @default(autoincrement())
-  vendorId      Int
-  docType       VendorDocumentType // <-- CHANGE: Use ENUM for validation
-  url           String             // File URL
-  fileName      String             
-  expiryDate    DateTime?          // CR, Zakat, ISO, etc. - Critical for Auto-Validation
-  documentNumber String?           // CR Number, VAT Number, GOSI Number, etc.
-  isValid       Boolean            @default(true) // Set to false if expired
-  uploadedAt    DateTime           @default(now())
-  
-  vendor        Vendor             @relation(fields: [vendorId], references: [id])
+  id            Int                @id @default(autoincrement())
+  vendorId      Int
+  docType       VendorDocumentType // ENUM: COMMERCIAL_REGISTRATION, ZAKAT_CERTIFICATE, etc.
+  url           String             // File URL (Mandatory for checklist)
+  fileName      String             
+  expiryDate    DateTime?          // Expiry Date (Mandatory for some docs)
+  documentNumber String?           // CR Number, VAT Number, GOSI Number, etc.
+  vatNumber      String?           // B. VAT Number
+  gosiNumber     String?           // B. GOSI Number
+  isoType        String?           // B. ISO Type (e.g., 9001, 14001)
+  isValid       Boolean            @default(true) // Set to false if expired
+  uploadedAt    DateTime           @default(now())
+  
+  vendor        Vendor             @relation(fields: [vendorId], references: [id])
 }
 
 model VendorProjectExperience {
