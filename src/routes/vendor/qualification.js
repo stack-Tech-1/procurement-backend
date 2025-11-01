@@ -117,24 +117,26 @@ router.post(
 
 
       // 2. Handle Other Documents
-      for (const meta of docMetadata) {
-        const fileKey = `file_${meta.docType}`;
-        const file = uploadedFiles.find(f => f.fieldname === fileKey);
+      for (const meta of docMetadata) {
+        const fileKey = `file_${meta.docType}`;
+        const file = uploadedFiles.find(f => f.fieldname === fileKey);
 
-        if (file) {
-          const storagePath = await uploadFileToSupabase(file, 'documents', vendor.id); 
-          
-          // FIX 2: Explicitly map fields and use getExpiryDate/null to clean data for Prisma
-          uploadedDocuments.push({
-            vendorId: vendor.id,
-            storagePath, 
-            docType: meta.docType,
-            fileName: file.originalname,
-            documentNumber: meta.documentNumber || null, // Convert falsy (undefined/empty string) to null
-            expiryDate: getExpiryDate(meta.expiryDate), // Convert string date to Date object, or null
-          });
-        }
-      }
+        if (file) {
+          const storagePath = await uploadFileToSupabase(file, 'documents', vendor.id); 
+          
+          // FIX 2: Explicitly map fields and use getExpiryDate/null to clean data for Prisma
+          uploadedDocuments.push({
+            vendorId: vendor.id,
+            storagePath, 
+            docType: meta.docType,
+            fileName: file.originalname,
+            documentNumber: meta.documentNumber || null,
+            expiryDate: getExpiryDate(meta.expiryDate), 
+            // 🔑 NEW FIELD: Include isoType if it exists
+            isoType: meta.isoType || null, 
+          });
+        }
+      }
 
       // 3. Handle Project Experience
       for (let i = 0; i < projectData.length; i++) {
@@ -162,29 +164,48 @@ router.post(
       // 4. Prisma Transaction
       const result = await prisma.$transaction(async (tx) => {
         
-        // 4.1 UPDATE THE VENDOR RECORD
-        const updatedVendor = await tx.vendor.update({
-          where: { id: vendor.id }, 
-          data: { 
-            ...qualificationDetails, 
-            status: 'UNDER_REVIEW', 
-            updatedAt: new Date(),
-          },
-        });
+
+        // 4.1 UPDATE THE VENDOR RECORD
+        const updatedVendor = await tx.vendor.update({
+          where: { id: vendor.id }, 
+          data: { 
+            // Ensure all qualificationDetails fields are spread
+            ...qualificationDetails, 
+            
+            // 🔑 NEW & UPDATED FIELD MAPPING:
+            mainCategory: Array.isArray(qualificationDetails.mainCategory) 
+              ? qualificationDetails.mainCategory 
+              : null, // Ensure Prisma receives an array or null
+            // If qualificationDetails is already validated by Zod, 
+            // these should be correct, but be explicit for clarity:
+            subCategory: qualificationDetails.subCategory || null,
+            csiSpecialization: qualificationDetails.csiSpecialization || null,
+            chamberClass: qualificationDetails.chamberClass || null,
+            chamberRegion: qualificationDetails.chamberRegion || null,
+            addressRegion: qualificationDetails.addressRegion || null, // The new address field
+            technicalContactName: qualificationDetails.technicalContactName || null,
+            technicalContactEmail: qualificationDetails.technicalContactEmail || null,
+            financialContactName: qualificationDetails.financialContactName || null,
+            financialContactEmail: qualificationDetails.financialContactEmail || null,
+
+            status: 'UNDER_REVIEW', 
+            updatedAt: new Date(),
+          },
+        });
 
         // 4.2 Handle Vendor Documents
         await tx.vendorDocument.deleteMany({ where: { vendorId: vendor.id } });
         await tx.vendorDocument.createMany({ 
-          data: uploadedDocuments.map(doc => ({
-            url: doc.storagePath, 
-            documentNumber: doc.documentNumber, 
-            expiryDate: doc.expiryDate, // This is now a Date object or null
-            docType: doc.docType, 
-            vendorId: doc.vendorId,
-            fileName: doc.fileName,
-          })) 
-        });
-
+                    data: uploadedDocuments.map(doc => ({
+                      url: doc.storagePath, 
+                      documentNumber: doc.documentNumber, 
+                      expiryDate: doc.expiryDate, 
+                      docType: doc.docType, 
+                      vendorId: doc.vendorId,
+                      fileName: doc.fileName,
+                      isoType: doc.isoType, // 🔑 NEW FIELD: Pass the isoType here
+                    })) 
+                  })
         // 4.3 Handle Project Experience
         await tx.vendorProjectExperience.deleteMany({ where: { vendorId: vendor.id } });
         await tx.vendorProjectExperience.createMany({ 
