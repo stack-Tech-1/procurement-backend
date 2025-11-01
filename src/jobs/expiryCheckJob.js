@@ -48,19 +48,21 @@ const checkSlaBreach = async () => {
 
     try {
         // Find vendors in 'UNDER_REVIEW' status submitted more than 48 hours ago
-        const staleVendors = await prisma.vendor.findMany({
-            where: {
-                status: 'UNDER_REVIEW',
-                createdAt: { lt: twoDaysAgo }
-            },
-            select: { id: true, name: true, createdAt: true, vendorId: true }
-        });
-
-        if (staleVendors.length > 0) {
-            // ... (email formatting logic is the same as before)
-            const vendorList = staleVendors.map(v => 
-                `Vendor ID: ${v.vendorId || v.id}, Name: ${v.name}, Submitted: ${v.createdAt.toLocaleDateString()}`
-            ).join('\n');
+                const staleVendors = await prisma.vendor.findMany({
+                        where: {
+                            status: 'UNDER_REVIEW',
+                            createdAt: { lt: twoDaysAgo }
+                        },
+                        // 🔑 Update: Change 'name' to 'companyLegalName'
+                        select: { id: true, companyLegalName: true, createdAt: true, vendorId: true } 
+                    });
+            
+                    if (staleVendors.length > 0) {
+                        
+                        // 🔑 Update: Use v.companyLegalName in the list formatting
+                        const vendorList = staleVendors.map(v => 
+                            `Vendor ID: ${v.vendorId || v.id}, Name: ${v.companyLegalName}, Submitted: ${v.createdAt.toLocaleDateString()}`
+                        ).join('\n');
 
             const subject = `🔥 URGENT: ${staleVendors.length} Vendor Submissions Exceeded 48h SLA`;
             const body = `Dear ${procurementUser.name},\n\nThe following vendor submissions have been in 'Under Review' status for over 48 hours and require immediate attention:\n\n${vendorList}\n\nPlease review and action these submissions promptly.`;
@@ -101,22 +103,27 @@ const checkAndFlagExpiredDocuments = async () => {
                 expiryDate: { not: null },
             },
             include: {
-                vendor: {
-                    select: { 
-                        id: true, 
-                        status: true, 
-                        contactEmail: true,
-                        vendorId: true, 
-                        name: true 
-                    }
-                }
-            }
-        });
-
-        const vendorsToUpdate = new Map(); // Map to hold unique vendor updates
-
-        for (const doc of docsToCheck) {
-            const vendor = doc.vendor;
+                                vendor: {
+                                        select: { 
+                                            id: true, 
+                                            status: true, 
+                                            contactEmail: true,
+                                            vendorId: true, 
+                                            // 🔑 Fix the invalid field here:
+                                            companyLegalName: true // Changed from 'name'
+                                        }
+                                    }
+                                }
+                            });
+                    
+                            const vendorsToUpdate = new Map(); // Map to hold unique vendor updates
+                    
+                            for (const doc of docsToCheck) {
+                                const vendor = doc.vendor;
+                                
+                                // 🔑 Update: When accessing the name of the vendor later in the loop:
+                                const vendorName = vendor.companyLegalName; 
+                    // ...
 
             if (!vendor) continue;
 
