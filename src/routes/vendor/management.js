@@ -61,13 +61,14 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
     }
 
     // Full-Text Search on name, CR, and email
-    if (search) {
-        where.OR = [
-            { name: { contains: search, mode: 'insensitive' } },
-            { crNumber: { contains: search, mode: 'insensitive' } },
-            { contactEmail: { contains: search, mode: 'insensitive' } },
-        ];
-    }
+        if (search) {
+                where.OR = [
+                    // 🔑 FIX: Change 'name' to 'companyLegalName'
+                    { companyLegalName: { contains: search, mode: 'insensitive' } },
+                    { crNumber: { contains: search, mode: 'insensitive' } },
+                    { contactEmail: { contains: search, mode: 'insensitive' } },
+                ];
+            }
     
     // 2. Build the ORDER BY clause for sorting
     const orderBy = {};
@@ -84,7 +85,7 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
                 select: {
                     id: true,
                     vendorId: true,
-                    name: true,
+                    companyLegalName: true,
                     vendorType: true,
                     status: true,
                     score: true,
@@ -117,6 +118,7 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
 
             return {
                 ...rest,
+                name: vendor.companyLegalName,
                 crExpiry,
                 isoExpiry,
                 zakatExpiry,
@@ -143,6 +145,13 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
 });
 
 
+
+
+
+
+
+
+
 /**
  * POST /api/vendor/status/:id
  * Updates the status of a vendor (Approve or Reject)
@@ -160,7 +169,7 @@ router.post('/status/:vendorId', authenticateToken, authorizeProcurement, async 
     try {
         const vendor = await prisma.vendor.findUnique({ 
             where: { id: parseInt(vendorId) },
-            select: { id: true, status: true, vendorId: true, name: true, contactEmail: true } 
+            select: { id: true, status: true, vendorId: true, companyLegalName: true, contactEmail: true } 
         });
 
         if (!vendor) {
@@ -232,6 +241,10 @@ router.post('/status/:vendorId', authenticateToken, authorizeProcurement, async 
 });
 
 
+
+
+
+
 /**
  * GET /api/vendor/analytics/summary
  * Returns key performance indicators (KPIs) for the dashboard.
@@ -280,6 +293,7 @@ router.get('/analytics/summary', authenticateToken, authorizeProcurement, async 
         }, {});
         // ----------------------------------------------------
 
+
         // 2. Count of vendors with Expired/Expiring Documents (Existing logic remains)
         const today = new Date();
         const thirtyDaysFromNow = new Date(today);
@@ -320,5 +334,13 @@ router.get('/analytics/summary', authenticateToken, authorizeProcurement, async 
         res.status(500).json({ error: 'Failed to fetch vendor analytics.' });
     }
 });
+
+
+
+
+
+
+
+
 
 export default router;
