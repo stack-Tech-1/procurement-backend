@@ -8,8 +8,7 @@
     "dev": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 nodemon src/index.js",
     "migrate": "npx prisma migrate deploy",    
     "seed": "node prisma/seed.js"
-  },
-  },  
+  },    
   "keywords": [],
   "author": "",
   "license": "ISC",
