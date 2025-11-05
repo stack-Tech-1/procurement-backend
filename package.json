@@ -4,10 +4,8 @@
   "main": "index.js",
   "type": "module",
 "scripts": {
-    "start": "npm run node src/index.js",
+    "start": "node src/index.js",
     "dev": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 nodemon src/index.js",
-    //"push-schema": "npx prisma db push", push-schema &&
-    //"migrate": "npx prisma migrate deploy", 
     "seed": "node prisma/seed.js"
   },
   "keywords": [],
