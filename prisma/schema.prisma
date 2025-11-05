@@ -8,29 +8,39 @@ datasource db {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  uuid       String   @unique @default(uuid())
-  name       String?
-  email      String   @unique
-  password   String
-  roleId     Int
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  accessCode String?
-  status     String   @default("ACTIVE")
+  id              Int      @id @default(autoincrement())
+  uuid            String   @unique @default(uuid())
+  name            String?
+  email           String   @unique
+  password        String
+  roleId          Int
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  accessCode      String?
+  status          String   @default("ACTIVE")
+  
+  // --- New Fields for User Management (Stage 3) ---
+  employeeId      String?  @unique // Mandatory – for linking to HR or internal systems.
+  jobTitle        String?  // Helps identify responsibility
+  department      String?  // e.g., Procurement, Contracts, Finance
+  lastLoginDate   DateTime? 
 
-  approvals     Approval[]
-  auditLogs     AuditLog[]     @relation("UserAuditLogs")
-  documents     Document[]     @relation("uploadedBy")
-  evaluations   Evaluation[]   @relation("UserEvaluations")
-  ipcs          IPC[]          @relation("UserIPCs")
-  notifications Notification[] @relation("UserNotifications")
-  rfqs          RFQ[]          @relation("UserRFQs")
-  role          Role           @relation(fields: [roleId], references: [id])
+  approvals       Approval[]
+  auditLogs       AuditLog[]      @relation("UserAuditLogs")
+  documents       Document[]      @relation("uploadedBy")
+  evaluations     Evaluation[]    @relation("UserEvaluations")
+  ipcs            IPC[]           @relation("UserIPCs")
+  notifications   Notification[]  @relation("UserNotifications")
+  rfqs            RFQ[]           @relation("UserRFQs")
+  role            Role     @relation(fields: [roleId], references: [id])
 
-  // ✅ Define relation to Vendor (no fields or references)
-  vendor Vendor?
+  // Vendor relationship (existing)
+  vendor          Vendor?
+
+  // --- New Reviewer Relations for Vendor Model (Stage 2) ---
+  vendorsAssigned Vendor[] @relation("AssignedReviewer")
+  vendorsReviewed Vendor[] @relation("LastReviewedBy")
 }
 
 model Role {
@@ -73,62 +83,79 @@ enum VendorDocumentType {
 
 // --- The Main Vendor Model (Consolidated and Enhanced) ---
 model Vendor {
-  id                  Int          @id @default(autoincrement())
-  vendorId            String?      @unique // A. Vendor ID (Auto-number)
-  companyLegalName    String?       // A. Company Legal Name (Mandatory)
-  code                String?      @unique // Retaining old code field if needed
- 
-  // --- A. Company Information ---
-  vendorType          String       // A. Vendor Type (Dropdown, Mandatory)
-  businessType        String?      // A. Business Type (Dropdown)
-  licenseNumber       String?      // A. License Number (Mandatory)
-  yearsInBusiness     Int?         // A. Years in Business (Mandatory)
-  gosiEmployeeCount   Int?         // A. GOSI Employee Count (Mandatory)
-  chamberClass        String?      // A. Chamber of Commerce Certificate (Dropdown)
-  chamberRegion       String?      // A. Chamber of Commerce Region/City
-  mainCategory        String[]     // A. Main Category (Multi-select)
-  subCategory         String?      // A. Sub-Category / Specialization
-  productsAndServices String[]     // A. Products & Services (Multi-select, Mandatory)
-  csiSpecializationId Int?         // A. CSI Specialization (Lookup to CSI_Material)
-  crNumber            String?      @unique // C. Commercial Registration Number (Mandatory)
-  
-  // --- B. Contact Information ---
-  contactPerson       String?      // B. Contact Person (Mandatory)
-  contactPhone        String?      // B. Phone Number (Mandatory)
-  contactEmail        String?      // B. Email Address (Mandatory)
-  website             String?      // B. Company Website (Optional)
-  addressStreet       String?      // B. Location: Street (Mandatory)
-  addressCity         String?      // B. Location: City (Mandatory)
-  addressRegion       String?      // B. Location: Region/State (Mandatory)
-  addressCountry      String?      // B. Location: Country (Mandatory)
-  primaryContactName  String?      // B. Primary Contact Name (Mandatory)
-  primaryContactTitle String?      // B. Primary Contact Title (Mandatory)
-  technicalContactName String?     // B. Technical Contact Name
-  technicalContactEmail String?    // B. Technical Contact Email
-  financialContactName String?     // B. Financial Contact Name
-  financialContactEmail String?    // B. Financial Contact Email
+  id                   Int           @id @default(autoincrement())
+  vendorId             String?       @unique // A. Vendor ID (Auto-number)
+  companyLegalName     String?       // A. Company Legal Name (Mandatory)
+  code                 String?       @unique // Retaining old code field if needed
+  
+  // --- A. Company Information (Enhanced) ---
+  vendorType           String        // A. Vendor Type (Keep)
+  ownershipType        String?       // ADDED: e.g., Local, Foreign, JointVenture (JV)
+  businessType         String?       // A. Business Type (Dropdown)
+  licenseNumber        String?       // A. License Number (Mandatory)
+  yearsInBusiness      Int?          // A. Years in Business (Mandatory)
+  gosiEmployeeCount    Int?          // A. GOSI Employee Count (Mandatory)
+  chamberClass         String?       // A. Chamber of Commerce Certificate (Keep)
+  chamberRegion        String?       // A. Chamber of Commerce Region/City
+  chamberExpiryDate    DateTime?     // ADDED: CoC Expiry Date
+  vatNumber            String?       // ADDED: Quick reference VAT Number
+  // mainCategory: String[] removed - replaced by VendorToCategory relation
+  // csiSpecializationId removed - replaced by VendorToCategory relation
+  productsAndServices  String[]      // A. Products & Services (Multi-select, Mandatory)
+  crNumber             String?       @unique // C. Commercial Registration Number (Mandatory)
+  
+  // --- B. Contact Information (Existing fields are kept) ---
+  contactPerson        String?       // B. Contact Person (Mandatory)
+  contactPhone         String?       // B. Phone Number (Mandatory)
+  contactEmail         String?       // B. Email Address (Mandatory)
+  website              String?       // B. Company Website (Optional)
+  addressStreet        String?       // B. Location: Street (Mandatory)
+  addressCity          String?       // B. Location: City (Mandatory)
+  addressRegion        String?       // B. Location: Region/State (Mandatory)
+  addressCountry       String?       // B. Location: Country (Mandatory)
+  primaryContactName   String?       // B. Primary Contact Name (Mandatory)
+  primaryContactTitle  String?       // B. Primary Contact Title (Mandatory)
+  technicalContactName String?       // B. Technical Contact Name
+  technicalContactEmail String?      // B. Technical Contact Email
+  financialContactName String?       // B. Financial Contact Name
+  financialContactEmail String?      // B. Financial Contact Email
 
-  // --- System/Status Fields ---
-  status              VendorStatus @default(NEW)
-  kreStatus           String       @default("New")
-  reviewNotes         String?
-  reviewStatus        String?
-  lastEvaluatorId     Int?
-  score               Float?
+  // --- System/Review Fields (Enhanced) ---
+  status               VendorStatus @default(NEW)
+  kreStatus            String       @default("New")
+  reviewNotes          String?      // Last review notes
+  reviewStatus         String?      // Last review status (redundant with main status, but kept)
+  
+  vendorClass          String?      @default("D") // ADDED: Classification: A, B, C, D
+  qualificationScore   Float?       @default(0)   // UPDATED: Renamed from 'score'
+  isQualified          Boolean      @default(false) // ADDED: Simple flag for quick filtering
 
-  // --- Relations ---
-  userId              Int          @unique
-  user                User         @relation(fields: [userId], references: [id])
-  projectExperience   VendorProjectExperience[] // A. Project Experience Table
-  documents           VendorDocument[]          // C. Document Checklist
-  categories          VendorCategory[] @relation("VendorToVendorCategory")
-  // ... (Other relations)
-  defaultCsiMaterial  CSI_Material[] @relation("CSI_MaterialToVendor")
-  priceEntries        PriceEntry[]
-  submissions         RFQSubmission[] 
-  contracts           Contract[]  
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  assignedReviewerId   Int?         // ADDED: ID of the internal user assigned to review
+  lastReviewedById     Int?         // ADDED: ID of the last internal user to review
+  nextReviewDate       DateTime?    // ADDED: Next scheduled review date
+
+  // --- Relations ---
+  userId               Int          @unique
+  user                 User         @relation(fields: [userId], references: [id])
+  projectExperience    VendorProjectExperience[] // A. Project Experience Table
+  documents            VendorDocument[]          // C. Document Checklist
+  
+  // Updated CSI/Category relationship
+  categories           VendorToCategory[] @relation("VendorToCategory") // UPDATED RELATION NAME
+
+  // Updated Reviewer relationships
+  assignedReviewer     User?        @relation("AssignedReviewer", fields: [assignedReviewerId], references: [id])
+  lastReviewedBy       User?        @relation("LastReviewedBy", fields: [lastReviewedById], references: [id])
+  
+  // ... (Other relations)
+  defaultCsiMaterial   CSI_Material[] @relation("CSI_MaterialToVendor")
+  priceEntries         PriceEntry[]
+  submissions          RFQSubmission[]
+  contracts            Contract[]
+  
+  // Audit fields
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 }
 
 // --- Enhanced VendorDocument Model (The Document Checklist) ---
@@ -163,12 +190,29 @@ model VendorProjectExperience {
   vendor           Vendor    @relation(fields: [vendorId], references: [id])
 }
 
-model VendorCategory {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  vendors   Vendor[] @relation("VendorToVendorCategory")
+// --- CSI / Category Master List (Renamed from VendorCategory) ---
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // e.g., "Architectural Finishes"
+  csiCode     String?  @unique // e.g., "09" (CSI Division)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relation to the link table
+  vendors     VendorToCategory[] 
+}
+
+// --- Intermediary Table for Many-to-Many relationship (Vendor <-> Category) ---
+model VendorToCategory {
+  id         Int      @id @default(autoincrement())
+  vendorId   Int
+  categoryId Int
+
+  vendor     Vendor   @relation("VendorToCategory", fields: [vendorId], references: [id])
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@unique([vendorId, categoryId]) // Prevents duplicate links
 }
 
 model CSI_Material {
