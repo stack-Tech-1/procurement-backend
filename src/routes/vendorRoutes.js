@@ -7,6 +7,7 @@ import {
   adminUpdateVendor,
   getVendorDetails,
   getMyQualificationDetails,
+  getFilteredVendorList,
 } from "../controllers/vendorController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 
@@ -23,6 +24,7 @@ router.get("/", authenticateToken, getAllVendors);
 //router.get("/:id", authenticateToken, getVendorById);
 router.put("/:id", authenticateToken, adminUpdateVendor);
 router.get('/:id', authenticateToken, getVendorDetails);
-router.get("/qualification/me", authenticateToken, getMyQualificationDetails); // <-- ADD THIS ROUTE
+router.get("/qualification/me", authenticateToken, getMyQualificationDetails); 
+router.get('/list', authenticateToken, getFilteredVendorList);
 
 export default router;

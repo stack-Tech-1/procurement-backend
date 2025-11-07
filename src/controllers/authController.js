@@ -119,6 +119,26 @@ export const login = async (req, res) => {
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) return res.status(400).json({ error: "Invalid email or password" });
 
+    // ✅ UPDATE: Set lastLoginDate before generating token
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: { 
+        lastLoginDate: new Date() 
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        roleId: true,
+        status: true,
+        isActive: true,
+        employeeId: true,
+        jobTitle: true,
+        department: true,
+        lastLoginDate: true
+      }
+    });
+
     // create token
     const token = jwt.sign(
       { id: user.id, roleId: user.roleId },
@@ -129,13 +149,7 @@ export const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
-      user: { 
-        id: user.id, 
-        name: user.name, 
-        email: user.email, 
-        roleId: user.roleId,
-        status: user.status 
-      },
+      user: updatedUser
     });
     
   } catch (error) {

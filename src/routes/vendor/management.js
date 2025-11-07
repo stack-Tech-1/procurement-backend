@@ -36,7 +36,7 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
         search, 
         status, 
         type, 
-        category, 
+        category, // New category filter
         sortField = 'updatedAt', 
         sortOrder = 'desc', 
         page = 1, 
@@ -53,22 +53,27 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
     // Filter by Status, Type, and Category
     if (status) where.status = status;
     if (type) where.vendorType = type;
-    // Assuming 'category' is the name property of the category
+    
+    // ✅ NEW: Filter by Category using the VendorToCategory link table
     if (category) {
-        // You'll need to link categories here if Vendor and Category are separate models.
-        // If Vendor model has a 'mainCategory' field (Multi-select) as a string array:
-        // where.productsAndServices = { hasSome: [category] }; // Adjust based on your schema for categories
+        where.categories = {
+            some: {
+                category: {
+                    name: category
+                }
+            }
+        };
     }
 
     // Full-Text Search on name, CR, and email
-        if (search) {
-                where.OR = [
-                    // 🔑 FIX: Change 'name' to 'companyLegalName'
-                    { companyLegalName: { contains: search, mode: 'insensitive' } },
-                    { crNumber: { contains: search, mode: 'insensitive' } },
-                    { contactEmail: { contains: search, mode: 'insensitive' } },
-                ];
-            }
+    if (search) {
+        where.OR = [
+            // Using the correct field: companyLegalName
+            { companyLegalName: { contains: search, mode: 'insensitive' } },
+            { crNumber: { contains: search, mode: 'insensitive' } },
+            { contactEmail: { contains: search, mode: 'insensitive' } },
+        ];
+    }
     
     // 2. Build the ORDER BY clause for sorting
     const orderBy = {};
@@ -88,10 +93,14 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
                     companyLegalName: true,
                     vendorType: true,
                     status: true,
-                    score: true,
+                    vendorClass: true,           // ✅ NEW: Include vendor classification
+                    qualificationScore: true,    // ✅ UPDATED: Renamed from 'score'
                     contactEmail: true,
                     addressCountry: true,
                     updatedAt: true,
+                    // ✅ NEW: Eagerly load assigned and last reviewer names
+                    assignedReviewer: { select: { name: true } }, 
+                    lastReviewedBy: { select: { name: true } },
                     // 4. Eagerly load all documents to extract expiry dates efficiently
                     documents: {
                         where: {
@@ -107,14 +116,14 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
             prisma.vendor.count({ where: where }),
         ]);
 
-        // 5. Post-process to extract expiry dates and apply front-end expiry filters (if needed)
+        // 5. Post-process to extract expiry dates and format reviewer names
         const processedVendors = vendors.map(vendor => {
             const crExpiry = extractDocumentDate(vendor.documents, 'COMMERCIAL_REGISTRATION');
             const isoExpiry = extractDocumentDate(vendor.documents, 'ISO_CERTIFICATE');
             const zakatExpiry = extractDocumentDate(vendor.documents, 'ZAKAT_CERTIFICATE');
             
-            // Remove the raw documents array
-            const { documents, ...rest } = vendor;
+            // Remove the raw documents/relation objects and flatten the reviewer names
+            const { documents, assignedReviewer, lastReviewedBy, ...rest } = vendor;
 
             return {
                 ...rest,
@@ -122,13 +131,10 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
                 crExpiry,
                 isoExpiry,
                 zakatExpiry,
+                assignedReviewerName: assignedReviewer?.name || null, // ✅ NEW
+                lastReviewedByName: lastReviewedBy?.name || null,     // ✅ NEW
             };
         });
-
-        // NOTE: Complex expiry filtering is usually better done on the backend.
-        // For simplicity, we'll keep the expiry filter basic here. 
-        // If the query was to include WHERE for Expiry Range, you would need
-        // a complex `WHERE` clause involving the `VendorDocument` table in the initial query.
 
         res.status(200).json({
             data: processedVendors,
@@ -147,29 +153,42 @@ router.get('/list', authenticateToken, authorizeProcurement, async (req, res) =>
 
 
 
-
-
-
-
-
 /**
  * POST /api/vendor/status/:id
- * Updates the status of a vendor (Approve or Reject)
+ * Updates the status and qualification/review fields of a vendor.
  */
 router.post('/status/:vendorId', authenticateToken, authorizeProcurement, async (req, res) => {
     const { vendorId } = req.params;
-    const { newStatus, reviewNotes } = req.body; // newStatus should be 'APPROVED' or 'REJECTED'
-    const userId = req.user.id; 
+    const { 
+        newStatus, 
+        reviewNotes,
+        vendorClass,         // NEW: Classification (A, B, C, D)
+        qualificationScore,  // NEW: Score (0-100)
+        assignedReviewerId,  // NEW: ID of the next person to review
+        nextReviewDate,      // NEW: Date for next review
+    } = req.body; 
+    
+    const currentUserId = req.user.id; 
 
-    // 1. Validation
-    if (!['APPROVED', 'REJECTED'].includes(newStatus)) {
+    // 1. Validation (Expanded to allow RENEWAL)
+    if (!['APPROVED', 'REJECTED', 'UNDER_REVIEW', 'BLACKLISTED', 'NEEDS_RENEWAL'].includes(newStatus)) {
         return res.status(400).json({ error: 'Invalid vendor status provided.' });
     }
 
     try {
         const vendor = await prisma.vendor.findUnique({ 
             where: { id: parseInt(vendorId) },
-            select: { id: true, status: true, vendorId: true, companyLegalName: true, contactEmail: true } 
+            select: { 
+                id: true, 
+                status: true, 
+                vendorId: true, 
+                companyLegalName: true, 
+                contactEmail: true,
+                // Include existing qualification fields for audit log comparison
+                vendorClass: true,
+                qualificationScore: true,
+                assignedReviewerId: true,
+            } 
         });
 
         if (!vendor) {
@@ -179,58 +198,83 @@ router.post('/status/:vendorId', authenticateToken, authorizeProcurement, async 
         const oldStatus = vendor.status;
         let finalVendorId = vendor.vendorId;
 
+        // Prepare the update data payload
+        const updateData = {
+            status: newStatus,
+            reviewNotes: reviewNotes || null,
+            updatedAt: new Date(),
+            
+            // Set qualification fields if provided (using undefined skips the update if null is not desired)
+            vendorClass: vendorClass || undefined,
+            // Convert score to Float if present, otherwise undefined
+            qualificationScore: qualificationScore !== undefined ? parseFloat(qualificationScore) : undefined, 
+            
+            // Set reviewer fields
+            assignedReviewerId: assignedReviewerId ? parseInt(assignedReviewerId) : null,
+            lastReviewedById: currentUserId, // The person executing this action
+            nextReviewDate: nextReviewDate ? new Date(nextReviewDate) : null,
+            
+            // Set the qualification flag based on the new status
+            isQualified: newStatus === 'APPROVED' ? true : newStatus === 'REJECTED' ? false : undefined,
+        };
+
         // 2. Transaction for Status Update and ID Assignment
         const updatedVendor = await prisma.$transaction(async (tx) => {
             
             // Check if approval requires ID assignment
             if (newStatus === 'APPROVED' && !vendor.vendorId) {
                 finalVendorId = await generateNewVendorId();
+                updateData.vendorId = finalVendorId;
             }
 
             // Update the Vendor record
             return await tx.vendor.update({
                 where: { id: vendor.id },
-                data: {
-                    status: newStatus,
-                    vendorId: finalVendorId,
-                    reviewNotes: reviewNotes || null,
-                    updatedAt: new Date(),
-                },
+                data: updateData,
             });
         });
 
         // 3. Post-Transaction Actions (Audit Log and Notification)
         
-        // Log the change
+        // Log the change (Enhanced to include new fields)
         await logAudit(
-            userId, 
-            `VENDOR_${newStatus}`, 
+            currentUserId, 
+            `VENDOR_QUALIFICATION_UPDATE`, 
             'Vendor', 
             vendor.id, 
             { 
                 oldStatus: oldStatus, 
                 newStatus: newStatus, 
                 vendorIdAssigned: finalVendorId,
-                reviewNotes: reviewNotes 
+                reviewNotes: reviewNotes,
+                oldVendorClass: vendor.vendorClass,
+                newVendorClass: updatedVendor.vendorClass,
+                oldScore: vendor.qualificationScore,
+                newScore: updatedVendor.qualificationScore,
+                assignedReviewerId: updatedVendor.assignedReviewerId,
+                lastReviewedById: currentUserId
             }
         );
 
-        // Send Email Notification
+        // Send Email Notification (Logic remains the same)
         let subject, body;
         if (newStatus === 'APPROVED') {
             subject = 'Vendor Qualification Approved - Welcome!';
             body = `Congratulations, your vendor qualification has been approved! Your assigned Vendor ID is: ${finalVendorId}. You are now eligible for RFQs.`;
-        } else {
+        } else if (newStatus === 'REJECTED') {
             subject = 'Vendor Qualification Rejected';
             body = `Your vendor qualification was rejected. Reason: ${reviewNotes || 'Please check the rejection details on your portal.'}`;
+        } else {
+             subject = `Vendor Status Updated to ${newStatus}`;
+             body = `Your vendor profile status has been updated to ${newStatus}. ${reviewNotes ? `Notes: ${reviewNotes}` : ''}`;
         }
 
         if (vendor.contactEmail) {
-             await sendVendorNotification(vendor.contactEmail, subject, body);
+              await sendVendorNotification(vendor.contactEmail, subject, body);
         }
 
         return res.status(200).json({ 
-            message: `Vendor ${vendor.name} status updated to ${newStatus}.`,
+            message: `Vendor ${vendor.companyLegalName} status and qualification updated to ${newStatus}.`,
             vendor: updatedVendor,
         });
 
@@ -239,7 +283,6 @@ router.post('/status/:vendorId', authenticateToken, authorizeProcurement, async 
         return res.status(500).json({ error: 'Failed to update vendor status.' });
     }
 });
-
 
 
 

@@ -1,22 +1,22 @@
+// backend/src/routes/contractRoutes.js
 import express from "express";
 import {
-  createContract,
   getContracts,
   getContractById,
+  createContract,
   updateContract,
-  deleteContract,
+  deleteContract
 } from "../controllers/contractController.js";
+import { authenticateToken } from "../middleware/authMiddleware.js";
 import { authorizeRole } from "../middleware/roleMiddleware.js";
 
 const router = express.Router();
 
-// Admin only can create, update, delete contracts
-router.post("/", authorizeRole([1]), createContract);
-router.put("/:id", authorizeRole([1]), updateContract);
-router.delete("/:id", authorizeRole([1]), deleteContract);
-
-// Admin and Vendor can view
-router.get("/", authorizeRole([1, 2]), getContracts);
-router.get("/:id", authorizeRole([1, 2]), getContractById);
+// Allow Vendors (roleId 2) to view contracts they're involved with
+router.get("/", authenticateToken, authorizeRole([1, 2, 3, 4, 5, 6, 7]), getContracts);
+router.get("/:id", authenticateToken, authorizeRole([1, 2, 3, 4, 5, 6, 7]), getContractById);
+router.post("/", authenticateToken, authorizeRole([1, 3, 4, 5, 6]), createContract);
+router.put("/:id", authenticateToken, authorizeRole([1, 3, 4, 5, 6]), updateContract);
+router.delete("/:id", authenticateToken, authorizeRole([1, 3]), deleteContract);
 
 export default router;

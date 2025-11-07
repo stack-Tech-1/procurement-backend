@@ -43,4 +43,3 @@ ALTER TABLE "VendorDocument"
 ADD COLUMN "gosiNumber" TEXT,
 ADD COLUMN "isoType" TEXT,
 ADD COLUMN "vatNumber" TEXT;
--- 5. MAKE NEW COLUMNS NOT NULL IF REQUIRED (optional, based on business rules)

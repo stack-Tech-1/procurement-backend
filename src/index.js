@@ -17,32 +17,19 @@ import adminFilesRouter from './routes/admin/files.js';
 import qualificationRoutes from './routes/qualification.routes.js';
 import vendorManagementRoute from "./routes/vendor/management.js";
 import { startExpiryCheckJob } from "./jobs/expiryCheckJob.js";
+import categoryRoutes from './routes/categoryRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
+import submissionRoutes from "./routes/submissionRoutes.js";
 
 dotenv.config();
 const app = express();
 
-const allowedOrigins = [
-  "http://localhost:3000",
-  "https://main.dwotf13xzdq3t.amplifyapp.com",
-  "https://erp.yourdomain.com"
-];
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
-
-
+app.use(cors({
+  origin: ["http://localhost:3000"], // your frontend's dev URL
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+}));
 
 
 app.use(express.json());
@@ -63,7 +50,9 @@ app.use("/api/vendor/qualification", vendorQualificationRoute);
 app.use('/api/admin/files', adminFilesRouter);
 app.use('/api/admin/submissions', qualificationRoutes);
 app.use("/api/vendor", vendorManagementRoute);
-
+app.use('/api/categories', categoryRoutes);
+app.use('/api/audit', auditRoutes);
+app.use("/api/submissions", submissionRoutes);
 
 
 app.get("/", (req, res) => {

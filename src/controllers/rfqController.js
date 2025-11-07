@@ -87,21 +87,60 @@ export const getRFQs = async (req, res) => {
 export const getRFQById = async (req, res) => {
   try {
     const { id } = req.params;
+    
+    console.log('🔍 Fetching RFQ details for ID:', id);
+
+    // Validate ID
+    if (!id || isNaN(Number(id))) {
+      return res.status(400).json({ error: "Invalid RFQ ID" });
+    }
+
     const rfq = await prisma.rFQ.findUnique({
       where: { id: Number(id) },
       include: {
         submissions: {
-          include: { vendor: true, evaluations: true },
+          include: { 
+            vendor: {
+              select: {
+                id: true,
+                companyLegalName: true,
+                vendorId: true,
+                contactEmail: true,
+                contactPhone: true
+              }
+            }, 
+            evaluations: {
+              include: {
+                evaluator: { select: { id: true, name: true, email: true } }
+              }
+            }
+          },
         },
         createdBy: { select: { id: true, email: true, name: true } },
+        attachments: true
       },
     });
 
-    if (!rfq) return res.status(404).json({ error: "RFQ not found" });
+    if (!rfq) {
+      console.log('❌ RFQ not found for ID:', id);
+      return res.status(404).json({ error: "RFQ not found" });
+    }
+
+    console.log('✅ RFQ found:', rfq.id);
     res.json(rfq);
+
   } catch (error) {
-    console.error("Error fetching RFQ:", error);
-    res.status(500).json({ error: "Failed to fetch RFQ" });
+    console.error("❌ Error fetching RFQ:", error);
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: "RFQ not found" });
+    }
+    
+    res.status(500).json({ 
+      error: "Failed to fetch RFQ",
+      details: error.message 
+    });
   }
 };
 
@@ -113,15 +152,60 @@ export const updateRFQ = async (req, res) => {
     const { id } = req.params;
     const data = req.body;
 
-    const updated = await prisma.rFQ.update({
-      where: { id: Number(id) },
-      data,
+    console.log('🔄 Update RFQ Request:', { id, data, user: req.user });
+
+    // Check if RFQ exists first
+    const existingRFQ = await prisma.rFQ.findUnique({
+      where: { id: Number(id) }
     });
 
+    if (!existingRFQ) {
+      return res.status(404).json({ error: "RFQ not found" });
+    }
+
+    // Prepare update data
+    const updateData = {
+      ...data,
+      updatedAt: new Date()
+    };
+
+    // Handle date fields properly
+    if (data.requiredDate) updateData.requiredDate = new Date(data.requiredDate);
+    if (data.targetSubmissionDate) updateData.targetSubmissionDate = new Date(data.targetSubmissionDate);
+    if (data.dueDate) updateData.dueDate = new Date(data.dueDate);
+
+    const updated = await prisma.rFQ.update({
+      where: { id: Number(id) },
+      data: updateData,
+      include: {
+        createdBy: { select: { id: true, email: true, name: true } },
+        submissions: {
+          include: {
+            vendor: true,
+            evaluations: true
+          }
+        }
+      }
+    });
+
+    console.log('✅ RFQ updated successfully');
     res.json(updated);
+
   } catch (error) {
-    console.error("Error updating RFQ:", error);
-    res.status(500).json({ error: "Failed to update RFQ" });
+    console.error("❌ Error updating RFQ:", error);
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: "RFQ not found" });
+    }
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: "Unique constraint violation - RFQ number already exists" });
+    }
+    
+    res.status(500).json({ 
+      error: "Failed to update RFQ",
+      details: error.message 
+    });
   }
 };
 

@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting database seeding...');
 
-  // 1️⃣ Seed roles with fixed IDs (so roleId = 3 works in register)
+  // 1️⃣ Seed roles with fixed IDs
   const roles = [
     { id: 1, name: 'Admin' },
     { id: 2, name: 'Procurement' },
@@ -24,22 +24,44 @@ async function main() {
 
   console.log('✅ Roles seeded:', roles.map(r => `${r.id} → ${r.name}`));
 
-  // 2️⃣ Seed default vendor categories
-  const vendorCategories = [
-    { name: 'Electrical' },
-    { name: 'Mechanical' },
-    { name: 'Civil' },
+  // 2️⃣ ✅ UPDATED: Seed CSI Categories (matches your new schema)
+  const csiCategories = [
+    { name: 'Procurement & Contracting', csiCode: '00' },
+    { name: 'General Requirements', csiCode: '01' },
+    { name: 'Existing Conditions', csiCode: '02' },
+    { name: 'Concrete', csiCode: '03' },
+    { name: 'Masonry', csiCode: '04' },
+    { name: 'Metals', csiCode: '05' },
+    { name: 'Wood, Plastics & Composites', csiCode: '06' },
+    { name: 'Thermal & Moisture Protection', csiCode: '07' },
+    { name: 'Openings', csiCode: '08' },
+    { name: 'Finishes', csiCode: '09' },
+    { name: 'Specialties', csiCode: '10' },
+    { name: 'Equipment', csiCode: '11' },
+    { name: 'Furnishings', csiCode: '12' },
+    { name: 'Special Construction', csiCode: '13' },
+    { name: 'Conveying Equipment', csiCode: '14' },
+    { name: 'Fire Suppression', csiCode: '21' },
+    { name: 'Plumbing', csiCode: '22' },
+    { name: 'HVAC', csiCode: '23' },
+    { name: 'Integrated Automation', csiCode: '25' },
+    { name: 'Electrical', csiCode: '26' },
+    { name: 'Communications', csiCode: '27' },
+    { name: 'Electronic Safety & Security', csiCode: '28' },
+    { name: 'Earthwork', csiCode: '31' },
+    { name: 'Exterior Improvements', csiCode: '32' },
+    { name: 'Utilities', csiCode: '33' },
   ];
 
-  for (const cat of vendorCategories) {
-    await prisma.vendorCategory.upsert({
-      where: { name: cat.name },
+  for (const category of csiCategories) {
+    await prisma.category.upsert({
+      where: { csiCode: category.csiCode },
       update: {},
-      create: cat,
+      create: category,
     });
   }
 
-  console.log('✅ Vendor Categories seeded:', vendorCategories.map(c => c.name));
+  console.log('✅ CSI Categories seeded:', csiCategories.length);
 
   // 3️⃣ Create a default admin user if it doesn't exist
   const adminEmail = 'admin@example.com';
