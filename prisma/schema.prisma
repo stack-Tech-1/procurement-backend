@@ -8,32 +8,41 @@ datasource db {
 }
 
 model User {
-  id              Int            @id @default(autoincrement())
-  uuid            String         @unique @default(uuid())
+  id              Int      @id @default(autoincrement())
+  uuid            String   @unique @default(uuid())
   name            String?
-  email           String         @unique
+  email           String   @unique
   password        String
   roleId          Int
-  isActive        Boolean        @default(true)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   accessCode      String?
-  status          String         @default("ACTIVE")
-  department      String?
-  employeeId      String?        @unique
+  status          String   @default("ACTIVE")
+  
+  employeeId      String?  @unique
   jobTitle        String?
-  lastLoginDate   DateTime?
+  department      String?
+  lastLoginDate   DateTime? 
+
   approvals       Approval[]
-  auditLogs       AuditLog[]     @relation("UserAuditLogs")
-  documents       Document[]     @relation("uploadedBy")
-  evaluations     Evaluation[]   @relation("UserEvaluations")
-  ipcs            IPC[]          @relation("UserIPCs")
-  notifications   Notification[] @relation("UserNotifications")
-  rfqs            RFQ[]          @relation("UserRFQs")
-  role            Role           @relation(fields: [roleId], references: [id])
-  vendorsAssigned Vendor[]       @relation("AssignedReviewer")
-  vendorsReviewed Vendor[]       @relation("LastReviewedBy")
+  auditLogs       AuditLog[]      @relation("UserAuditLogs")
+  documents       Document[]      @relation("uploadedBy")
+  evaluations     Evaluation[]    @relation("UserEvaluations")
+  ipcs            IPC[]           @relation("UserIPCs")
+  notifications   Notification[]  @relation("UserNotifications")
+  rfqs            RFQ[]           @relation("UserRFQs")
+  role            Role     @relation(fields: [roleId], references: [id])
+
   vendor          Vendor?
+
+  vendorsAssigned Vendor[] @relation("AssignedReviewer")
+  vendorsReviewed Vendor[] @relation("LastReviewedBy")
+
+  // ---Reporting System Relations---
+  reportsCreated  Report[]                @relation("UserCreatedReports")
+  reportExecutions ReportExecution[]      @relation("UserReportExecutions")
+  reportFavorites UserReportFavorite[]    @relation("UserReportFavorites")
 }
 
 model Role {
@@ -43,76 +52,130 @@ model Role {
   users User[]
 }
 
-model Vendor {
-  id                    Int                       @id @default(autoincrement())
-  code                  String?                   @unique
-  contactEmail          String?
-  contactPhone          String?
-  status                VendorStatus              @default(NEW)
-  createdAt             DateTime                  @default(now())
-  updatedAt             DateTime                  @updatedAt
-  addressCity           String?
-  addressCountry        String?
-  addressRegion         String?
-  addressStreet         String?
-  businessType          String?
-  chamberClass          String?
-  chamberRegion         String?
-  contactPerson         String?
-  crNumber              String?                   @unique
-  gosiEmployeeCount     Int?
-  kreStatus             String                    @default("New")
-  licenseNumber         String?
-  primaryContactName    String?
-  primaryContactTitle   String?
-  productsAndServices   String[]
-  reviewNotes           String?
-  reviewStatus          String?
-  userId                Int                       @unique
-  vendorId              String?                   @unique
-  vendorType            String
-  website               String?
-  yearsInBusiness       Int?
-  companyLegalName      String?
-  financialContactEmail String?
-  financialContactName  String?
-  technicalContactEmail String?
-  technicalContactName  String?
-  assignedReviewerId    Int?
-  chamberExpiryDate     DateTime?
-  isQualified           Boolean                   @default(false)
-  lastReviewedById      Int?
-  nextReviewDate        DateTime?
-  ownershipType         String?
-  qualificationScore    Float?                    @default(0)
-  vatNumber             String?
-  vendorClass           String?                   @default("D")
-  defaultCsiMaterial    CSI_Material[]            @relation("CSI_MaterialToVendor")
-  contracts             Contract[]
-  priceEntries          PriceEntry[]
-  submissions           RFQSubmission[]
-  assignedReviewer      User?                     @relation("AssignedReviewer", fields: [assignedReviewerId], references: [id])
-  lastReviewedBy        User?                     @relation("LastReviewedBy", fields: [lastReviewedById], references: [id])
-  user                  User                      @relation(fields: [userId], references: [id])
-  documents             VendorDocument[]
-  projectExperience     VendorProjectExperience[]
-  categories            VendorToCategory[]        @relation("VendorToCategory")
+// --- Vendor Status Enum (Already good, but adding a status for 'Needs Renewal') ---
+enum VendorStatus {
+  NEW
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  BLACKLISTED
+  NEEDS_RENEWAL // Added for auto-validation rule: auto "Rejected" or "Needs Renewal"
 }
 
+// --- New Document Type Enum (Required for robust Document Checklist) ---
+enum VendorDocumentType {
+  COMMERCIAL_REGISTRATION // CR
+  ZAKAT_CERTIFICATE
+  ISO_CERTIFICATE
+  SASO_SABER_CERTIFICATE
+  HSE_PLAN
+  WARRANTY_CERTIFICATE
+  QUALITY_PLAN
+  ORGANIZATION_CHART
+  TECHNICAL_FILE
+  FINANCIAL_FILE
+  VAT_CERTIFICATE
+  GOSI_CERTIFICATE
+  BANK_LETTER
+  INSURANCE_CERTIFICATE
+  INDUSTRY_LICENSE
+  VENDOR_CODE_OF_CONDUCT
+  COMPANY_PROFILE
+}
+
+// --- The Main Vendor Model (Consolidated and Enhanced) ---
+model Vendor {
+  id                   Int           @id @default(autoincrement())
+  vendorId             String?       @unique // A. Vendor ID (Auto-number)
+  companyLegalName     String?       // A. Company Legal Name (Mandatory)
+  code                 String?       @unique // Retaining old code field if needed
+  
+  // --- A. Company Information (Enhanced) ---
+  vendorType           String        // A. Vendor Type (Keep)
+  ownershipType        String?       // ADDED: e.g., Local, Foreign, JointVenture (JV)
+  businessType         String?       // A. Business Type (Dropdown)
+  licenseNumber        String?       // A. License Number (Mandatory)
+  yearsInBusiness      Int?          // A. Years in Business (Mandatory)
+  gosiEmployeeCount    Int?          // A. GOSI Employee Count (Mandatory)
+  chamberClass         String?       // A. Chamber of Commerce Certificate (Keep)
+  chamberRegion        String?       // A. Chamber of Commerce Region/City
+  chamberExpiryDate    DateTime?     // ADDED: CoC Expiry Date
+  vatNumber            String?       // ADDED: Quick reference VAT Number
+  // mainCategory: String[] removed - replaced by VendorToCategory relation
+  // csiSpecializationId removed - replaced by VendorToCategory relation
+  productsAndServices  String[]      // A. Products & Services (Multi-select, Mandatory)
+  crNumber             String?       @unique // C. Commercial Registration Number (Mandatory)
+  
+  // --- B. Contact Information (Existing fields are kept) ---
+  contactPerson        String?       // B. Contact Person (Mandatory)
+  contactPhone         String?       // B. Phone Number (Mandatory)
+  contactEmail         String?       // B. Email Address (Mandatory)
+  website              String?       // B. Company Website (Optional)
+  addressStreet        String?       // B. Location: Street (Mandatory)
+  addressCity          String?       // B. Location: City (Mandatory)
+  addressRegion        String?       // B. Location: Region/State (Mandatory)
+  addressCountry       String?       // B. Location: Country (Mandatory)
+  primaryContactName   String?       // B. Primary Contact Name (Mandatory)
+  primaryContactTitle  String?       // B. Primary Contact Title (Mandatory)
+  technicalContactName String?       // B. Technical Contact Name
+  technicalContactEmail String?      // B. Technical Contact Email
+  financialContactName String?       // B. Financial Contact Name
+  financialContactEmail String?      // B. Financial Contact Email
+
+  // --- System/Review Fields (Enhanced) ---
+  status               VendorStatus @default(NEW)
+  kreStatus            String       @default("New")
+  reviewNotes          String?      // Last review notes
+  reviewStatus         String?      // Last review status (redundant with main status, but kept)
+  
+  vendorClass          String?      @default("D") // ADDED: Classification: A, B, C, D
+  qualificationScore   Float?       @default(0)   // UPDATED: Renamed from 'score'
+  isQualified          Boolean      @default(false) // ADDED: Simple flag for quick filtering
+
+  assignedReviewerId   Int?         // ADDED: ID of the internal user assigned to review
+  lastReviewedById     Int?         // ADDED: ID of the last internal user to review
+  nextReviewDate       DateTime?    // ADDED: Next scheduled review date
+
+  // --- Relations ---
+  userId               Int          @unique
+  user                 User         @relation(fields: [userId], references: [id])
+  projectExperience    VendorProjectExperience[] // A. Project Experience Table
+  documents            VendorDocument[]          // C. Document Checklist
+  
+  // Updated CSI/Category relationship
+  categories           VendorToCategory[] @relation("VendorToCategory") // UPDATED RELATION NAME
+
+  // Updated Reviewer relationships
+  assignedReviewer     User?        @relation("AssignedReviewer", fields: [assignedReviewerId], references: [id])
+  lastReviewedBy       User?        @relation("LastReviewedBy", fields: [lastReviewedById], references: [id])
+  
+  // ... (Other relations)
+  defaultCsiMaterial   CSI_Material[] @relation("CSI_MaterialToVendor")
+  priceEntries         PriceEntry[]
+  submissions          RFQSubmission[]
+  contracts            Contract[]
+  
+  // Audit fields
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+}
+
+// --- Enhanced VendorDocument Model (The Document Checklist) ---
 model VendorDocument {
-  id             Int                @id @default(autoincrement())
-  vendorId       Int
-  url            String
-  fileName       String
-  expiryDate     DateTime?
-  uploadedAt     DateTime           @default(now())
-  documentNumber String?
-  isValid        Boolean            @default(true)
-  docType        VendorDocumentType
-  gosiNumber     String?
-  isoType        String?
-  vatNumber      String?
-  vendor         Vendor             @relation(fields: [vendorId], references: [id])
+  id            Int                @id @default(autoincrement())
+  vendorId      Int
+  docType       VendorDocumentType // ENUM: COMMERCIAL_REGISTRATION, ZAKAT_CERTIFICATE, etc.
+  url           String             // File URL (Mandatory for checklist)
+  fileName      String             
+  expiryDate    DateTime?          // Expiry Date (Mandatory for some docs)
+  documentNumber String?           // CR Number, VAT Number, GOSI Number, etc.
+  vatNumber      String?           // B. VAT Number
+  gosiNumber     String?           // B. GOSI Number
+  isoType        String?           // B. ISO Type (e.g., 9001, 14001)
+  isValid       Boolean            @default(true) // Set to false if expired
+  uploadedAt    DateTime           @default(now())
+  
+  vendor        Vendor             @relation(fields: [vendorId], references: [id])
 }
 
 model VendorProjectExperience {
@@ -125,28 +188,33 @@ model VendorProjectExperience {
   endDate          DateTime?
   scopeDescription String?
   referenceContact String?
-  completionFile   String?
+  completionFile   String? // URL
   vendor           Vendor    @relation(fields: [vendorId], references: [id])
 }
 
+// --- CSI / Category Master List (Renamed from VendorCategory) ---
 model Category {
-  id          Int                @id @default(autoincrement())
-  name        String             @unique
-  csiCode     String?            @unique
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // e.g., "Architectural Finishes"
+  csiCode     String?  @unique // e.g., "09" (CSI Division)
   description String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  vendors     VendorToCategory[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relation to the link table
+  vendors     VendorToCategory[] 
 }
 
+// --- Intermediary Table for Many-to-Many relationship (Vendor <-> Category) ---
 model VendorToCategory {
   id         Int      @id @default(autoincrement())
   vendorId   Int
   categoryId Int
-  category   Category @relation(fields: [categoryId], references: [id])
-  vendor     Vendor   @relation("VendorToCategory", fields: [vendorId], references: [id])
 
-  @@unique([vendorId, categoryId])
+  vendor     Vendor   @relation("VendorToCategory", fields: [vendorId], references: [id])
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@unique([vendorId, categoryId]) // Prevents duplicate links
 }
 
 model CSI_Material {
@@ -329,33 +397,152 @@ model Notification {
   user      User     @relation("UserNotifications", fields: [userId], references: [id])
 }
 
-enum VendorStatus {
-  NEW
-  UNDER_REVIEW
-  APPROVED
-  REJECTED
-  BLACKLISTED
-  NEEDS_RENEWAL
+
+model Report {
+  id              Int              @id @default(autoincrement())
+  name            String
+  description     String?
+  category        String
+  dataSource      String
+  createdById     Int
+  isPublic        Boolean          @default(false)
+  isScheduled     Boolean          @default(false)
+  scheduleFrequency String?
+  nextSchedule    DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  
+  createdBy       User             @relation("UserCreatedReports", fields: [createdById], references: [id])
+  filters         ReportFilter[]
+  columns         ReportColumn[]
+  executions      ReportExecution[]
+  favorites       UserReportFavorite[]
 }
 
-enum VendorDocumentType {
-  COMMERCIAL_REGISTRATION
-  ZAKAT_CERTIFICATE
-  ISO_CERTIFICATE
-  SASO_SABER_CERTIFICATE
-  HSE_PLAN
-  WARRANTY_CERTIFICATE
-  QUALITY_PLAN
-  ORGANIZATION_CHART
-  TECHNICAL_FILE
-  FINANCIAL_FILE
-  VAT_CERTIFICATE
-  GOSI_CERTIFICATE
-  BANK_LETTER
-  INSURANCE_CERTIFICATE
-  INDUSTRY_LICENSE
-  VENDOR_CODE_OF_CONDUCT
-  COMPANY_PROFILE
+model ReportFilter {
+  id        Int    @id @default(autoincrement()) // Changed from String
+  reportId  Int                                  // Changed from String
+  field     String  // Match backend field name
+  operator  String
+  value     String
+  sortOrder Int    @default(0)
+  
+  report    Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model ReportColumn {
+  id              Int    @id @default(autoincrement()) // Changed from String
+  reportId        Int                                  // Changed from String
+  fieldName       String
+  columnLabel     String
+  dataType        String  // Simplified to match backend
+  aggregationType String  @default("NONE") // Simplified
+  sortOrder       Int     @default(0)
+  
+  report          Report  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model ReportExecution {
+  id            Int      @id @default(autoincrement())
+  reportId      Int                                    
+  executedById  Int
+  status        String
+  parameters    Json?
+  recordCount   Int?
+  executionTime Int?
+  errorMessage  String?
+  filePath      String?
+  executedAt    DateTime @default(now())
+  
+  report       Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  executedBy   User   @relation("UserReportExecutions", fields: [executedById], references: [id]) // ADDED relation name
+}
+
+model UserReportFavorite {
+  id       Int @id @default(autoincrement())
+  userId   Int
+  reportId Int
+  
+  user   User   @relation("UserReportFavorites", fields: [userId], references: [id]) // ADDED relation name
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reportId])
+}
+
+// Report Templates (Pre-built reports)
+model ReportTemplate {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  category    ReportCategory
+  dataSource  String
+  template    Json           // Complete report definition
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  
+  @@map("report_templates")
+}
+
+// Report Categories Enum
+enum ReportCategory {
+  FINANCIAL
+  VENDOR
+  CONTRACT
+  PROJECT
+  CUSTOM
+}
+
+// Report Schedule Frequency Enum
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+// Filter Types Enum
+enum FilterType {
+  DATE
+  SELECT
+  MULTISELECT
+  NUMBER
+  TEXT
+  BOOLEAN
+}
+
+// Data Types Enum
+enum DataType {
+  STRING
+  NUMBER
+  DATE
+  CURRENCY
+  PERCENTAGE
+  BOOLEAN
+}
+
+// Aggregation Types Enum
+enum AggregationType {
+  SUM
+  AVERAGE
+  COUNT
+  MIN
+  MAX
+  NONE
+}
+
+// Report Status Enum
+enum ReportStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+// Report Execution Status Enum
+enum ExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
 }
 
 enum UserStatus {
