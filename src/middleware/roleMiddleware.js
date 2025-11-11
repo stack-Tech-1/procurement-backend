@@ -1,10 +1,11 @@
 import jwt from "jsonwebtoken";
 import prisma from "../config/prismaClient.js";
+// backend/src/middleware/roleMiddleware.js
+import { ROLES } from '../constants/roles.js';
 
 // backend/src/middleware/roleMiddleware.js
 export const authorizeRole = (allowedRoles) => {
   return (req, res, next) => {
-    // Check if user exists and has roleId
     if (!req.user || !req.user.roleId) {
       return res.status(401).json({ error: "User role not found" });
     }
@@ -13,14 +14,20 @@ export const authorizeRole = (allowedRoles) => {
     if (!allowedRoles.includes(req.user.roleId)) {
       return res.status(403).json({ 
         error: "Access denied. Insufficient permissions.",
-        requiredRoles: allowedRoles,
-        userRole: req.user.roleId
+        requiredRoles: allowedRoles.map(id => ROLES[id]),
+        userRole: ROLES[req.user.roleId]
       });
     }
 
     next();
   };
 };
+
+
+// Convenience middleware for common role combinations
+export const requireExecutive = authorizeRole([ROLES.EXECUTIVE]);
+export const requireManagerOrExecutive = authorizeRole([ROLES.EXECUTIVE, ROLES.PROCUREMENT_MANAGER]);
+export const requireProcurementStaff = authorizeRole([ROLES.EXECUTIVE, ROLES.PROCUREMENT_MANAGER, ROLES.PROCUREMENT_OFFICER]);
 
 // Special middleware for IPC status updates based on workflow
 export const authorizeIPCStatusUpdate = (req, res, next) => {

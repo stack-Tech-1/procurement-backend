@@ -9,20 +9,22 @@ async function main() {
 
   // 1️⃣ Seed roles with fixed IDs
   const roles = [
-    { id: 1, name: 'Admin' },
-    { id: 2, name: 'Procurement' },
-    { id: 3, name: 'Vendor' },
+    { id: 1, name: 'Executive' },
+    { id: 2, name: 'Procurement Manager' },
+    { id: 3, name: 'Procurement Officer' },
+    { id: 4, name: 'Vendor' },
   ];
 
   for (const role of roles) {
     await prisma.role.upsert({
       where: { id: role.id },
-      update: {},
+      update: { name: role.name }, // Update name if role exists
       create: role,
     });
   }
 
   console.log('✅ Roles seeded:', roles.map(r => `${r.id} → ${r.name}`));
+
 
   // 2️⃣ ✅ UPDATED: Seed CSI Categories (matches your new schema)
   const csiCategories = [

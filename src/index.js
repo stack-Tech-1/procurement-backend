@@ -1,3 +1,4 @@
+// backend/src/index.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -20,6 +21,17 @@ import { startExpiryCheckJob } from "./jobs/expiryCheckJob.js";
 import categoryRoutes from './routes/categoryRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import submissionRoutes from "./routes/submissionRoutes.js";
+import reportRoutes from './routes/reports.js';
+import dashboardRoutes from './routes/dashboard.js';
+import notificationRoutes from './routes/notifications.js';
+import { schedulerService } from './services/schedulerService.js';
+import taskRoutes from './routes/tasks.js';
+import healthRoutes from './routes/health.js';
+import documentRoutes from './routes/documents.js';
+import approvalWorkflowRoutes from './routes/approvalWorkflows.js';
+import { initializeDefaultRoles } from './scripts/initializeRoles.js';
+import approvalWorkflowService from './services/approvalWorkflowService.js';
+
 
 dotenv.config();
 const app = express();
@@ -37,7 +49,6 @@ app.use(express.json());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
-
 app.use("/api/vendors", vendorRoutes);
 app.use("/api/materials", materialRoutes);
 app.use("/api/price-entries", priceEntryRoutes);
@@ -46,13 +57,20 @@ app.use("/api/users", userRoutes);
 app.use("/api/contracts", contractRoutes);
 app.use("/api/ipcs", ipcRoutes);
 app.use("/api/vendor/qualification", vendorQualificationRoute);
-//app.use('/api/admin/submissions', adminSubmissionsRouter);
 app.use('/api/admin/files', adminFilesRouter);
 app.use('/api/admin/submissions', qualificationRoutes);
 app.use("/api/vendor", vendorManagementRoute);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/audit', auditRoutes);
 app.use("/api/submissions", submissionRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/health', healthRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/approvals', approvalWorkflowRoutes);
+
 
 
 app.get("/", (req, res) => {
@@ -65,9 +83,38 @@ app.get("/api/health", (req, res) => {
 
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+
+// Start server
+app.listen(PORT, async () => {
+  console.log(`Server running on port ${PORT}`);
+  
+  try {
+    // Initialize default roles and workflows
+    console.log('🔄 Initializing default data...');
     
-    // 👇 START THE CRON JOB AFTER THE SERVER IS RUNNING
+    try {
+      await initializeDefaultRoles();
+      console.log('✅ Default roles initialized');
+    } catch (roleError) {
+      console.warn('⚠️ Role initialization had issues, but continuing:', roleError.message);
+    }
+    
+    try {
+      await approvalWorkflowService.createDefaultWorkflowTemplates();
+      console.log('✅ Default workflow templates initialized');
+    } catch (workflowError) {
+      console.warn('⚠️ Workflow template initialization had issues, but continuing:', workflowError.message);
+    }
+    
+    console.log('✅ Default data initialization completed');
+    
+    // Start background jobs after server is running
     startExpiryCheckJob(); 
+    schedulerService.startScheduledJobs();
+    console.log('✅ Background jobs started');
+    
+  } catch (error) {
+    console.error('❌ Failed during startup initialization:', error.message);
+    console.log('🔄 Continuing server startup despite initialization issues...');
+  }
 });

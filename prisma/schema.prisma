@@ -43,6 +43,16 @@ model User {
   reportsCreated  Report[]                @relation("UserCreatedReports")
   reportExecutions ReportExecution[]      @relation("UserReportExecutions")
   reportFavorites UserReportFavorite[]    @relation("UserReportFavorites")
+
+  // 👇 ADDED: MISSING RELATIONS FOR THE TASK MODEL
+  tasksAssigned   Task[] @relation("AssignedTasks") // Inverse for 'assignedUser'
+  tasksCreated    Task[] @relation("CreatedTasks")  // Inverse for 'assignedByUser'
+
+     // 👇 ADD: New relations for document management
+  signedDocuments Document[] @relation("SignedDocuments")
+  documentApprovals DocumentApproval[] @relation("DocumentApprovalApprover")
+  createdTemplates DocumentTemplate[] @relation("DocumentTemplateCreator")
+  approvalActions ApprovalAction[] @relation("ApprovalActionApprover") // 👈 ADD THIS
 }
 
 model Role {
@@ -50,6 +60,10 @@ model Role {
   desc  String?
   name  String  @unique
   users User[]
+
+  // Add these relations:
+  documentApprovalSteps DocumentApprovalStep[]
+  approvalWorkflowSteps ApprovalWorkflowStep[] // 👈 ADD THIS
 }
 
 // --- Vendor Status Enum (Already good, but adding a status for 'Needs Renewal') ---
@@ -346,6 +360,7 @@ model IPC {
   submittedBy     User       @relation("UserIPCs", fields: [submittedById], references: [id])
 }
 
+// Enhanced Document Model with Version Control
 model Document {
   id             Int       @id @default(autoincrement())
   fileName       String
@@ -355,12 +370,102 @@ model Document {
   size           Int?
   uploadedById   Int?
   uploadedAt     DateTime  @default(now())
+  
+  // Version Control Fields
+  version        Int       @default(1)
+  isCurrent      Boolean   @default(true)
+  previousVersionId Int?
+  previousVersion Document? @relation("DocumentVersions", fields: [previousVersionId], references: [id])
+  nextVersions   Document[] @relation("DocumentVersions")
+  
+  // Digital Signature Fields
+  requiresSignature Boolean @default(false)
+  signatureStatus   SignatureStatus @default(NOT_REQUIRED)
+  signedById      Int?
+  signedBy        User?    @relation("SignedDocuments", fields: [signedById], references: [id])
+  signedAt        DateTime?
+  
+  // Approval Workflow - FIXED: Use DRAFT instead of PENDING
+  approvalStatus  DocumentApprovalStatus @default(DRAFT)
+  approvalWorkflowId Int?
+  approvalWorkflow DocumentApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
+  
+  // Relations
   ipcId          Int?
   contractId     Int?
   contract       Contract? @relation("ContractDocuments", fields: [contractId], references: [id])
   ipc            IPC?      @relation("IPCAttachments", fields: [ipcId], references: [id])
   uploadedBy     User?     @relation("uploadedBy", fields: [uploadedById], references: [id])
   rfqAttachments RFQ[]     @relation("rfqAttachments")
+
+  // Add this relation at the end:
+  documentApprovals DocumentApproval[] @relation("DocumentApprovals")
+  
+  // Document metadata for search
+  tags           String[]
+  category       String?
+  description    String?
+  
+  @@map("documents")
+}
+
+// Document Approval Workflow
+model DocumentApprovalWorkflow {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  steps       DocumentApprovalStep[]
+  documents   Document[]
+  createdAt   DateTime  @default(now())
+  isActive    Boolean   @default(true)
+}
+
+model DocumentApprovalStep {
+  id          Int       @id @default(autoincrement())
+  workflowId  Int
+  sequence    Int
+  roleId      Int
+  role        Role      @relation(fields: [roleId], references: [id])
+  isRequired  Boolean   @default(true)
+  workflow    DocumentApprovalWorkflow @relation(fields: [workflowId], references: [id])
+
+  // Add this relation:
+  documentApprovals DocumentApproval[] @relation("DocumentApprovalSteps")
+  
+  @@unique([workflowId, sequence])
+}
+
+model DocumentApproval {
+  id          Int       @id @default(autoincrement())
+  documentId  Int
+  stepId      Int
+  approverId  Int
+  status      ApprovalStatus @default(PENDING)
+  comments    String?
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  
+  // Add the inverse relations with the same relation names:
+  document    Document  @relation("DocumentApprovals", fields: [documentId], references: [id])
+  step        DocumentApprovalStep @relation("DocumentApprovalSteps", fields: [stepId], references: [id])
+  approver    User      @relation("DocumentApprovalApprover", fields: [approverId], references: [id])
+  
+  @@unique([documentId, stepId])
+}
+
+// Document Templates
+model DocumentTemplate {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  category    String
+  fileUrl     String?
+  content     Json?     // For dynamic templates
+  variables   Json?     // Template variables schema
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  createdById Int
+  createdBy   User      @relation("DocumentTemplateCreator", fields: [createdById], references: [id])
 }
 
 model Approval {
@@ -376,6 +481,81 @@ model Approval {
   approver   User           @relation(fields: [approverId], references: [id])
 }
 
+// Approval Workflow Templates
+model ApprovalWorkflowTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  category    String   // "VENDOR_QUALIFICATION", "CONTRACT", "PO", "IPC"
+  steps       ApprovalWorkflowStep[]
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  approvalInstances ApprovalInstance[] @relation("ApprovalWorkflowInstances") // 👈 ADD THIS
+
+  @@map("approval_workflow_templates")
+}
+
+model ApprovalWorkflowStep {
+  id          String   @id @default(uuid())
+  templateId  String
+  sequence    Int
+  roleId      Int
+  role        Role     @relation(fields: [roleId], references: [id])
+  isRequired  Boolean  @default(true)
+  minAmount   Float?   // Minimum amount for this step to trigger
+  maxAmount   Float?   // Maximum amount for this step
+  conditions  Json?    // Additional conditions for routing
+  
+  template    ApprovalWorkflowTemplate @relation(fields: [templateId], references: [id])
+
+  // Add this relation:
+  approvalActions ApprovalAction[] @relation("ApprovalWorkflowStepActions") // 👈 ADD THIS
+  
+  @@unique([templateId, sequence])
+  @@map("approval_workflow_steps")
+}
+
+// Active Approval Instances
+model ApprovalInstance {
+  id          String   @id @default(uuid())
+  entityType  String   // "VENDOR", "CONTRACT", "PO", "IPC"
+  entityId    Int
+  workflowId  String
+  status      ApprovalInstanceStatus @default(PENDING)
+  currentStep Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workflow    ApprovalWorkflowTemplate @relation("ApprovalWorkflowInstances", fields: [workflowId], references: [id]) // 👈 ADD RELATION NAME
+  approvals   ApprovalAction[]
+  
+  @@unique([entityType, entityId])
+  @@map("approval_instances")
+}
+
+model ApprovalAction {
+  id          String         @id @default(uuid())
+  instanceId  String
+  stepId      String
+  approverId  Int
+  status      ApprovalStatus @default(PENDING)
+  comments    String?
+  signedAt    DateTime?
+  signatureData Json?        // Digital signature data
+  metadata    Json?          // Additional approval data
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  instance    ApprovalInstance @relation(fields: [instanceId], references: [id])
+  step        ApprovalWorkflowStep @relation("ApprovalWorkflowStepActions", fields: [stepId], references: [id]) // 👈 ADD RELATION NAME
+  approver    User           @relation("ApprovalActionApprover", fields: [approverId], references: [id]) // 👈 ADD RELATION NAME
+  
+  @@unique([instanceId, stepId])
+  @@map("approval_actions")
+}
+
 model AuditLog {
   id        Int      @id @default(autoincrement())
   userId    Int?
@@ -387,14 +567,25 @@ model AuditLog {
   user      User?    @relation("UserAuditLogs", fields: [userId], references: [id])
 }
 
+
+// In your Notification model, update to:
 model Notification {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  title     String
-  body      String?
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
-  user      User     @relation("UserNotifications", fields: [userId], references: [id])
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  title       String
+  body        String?
+  type        String    @default("INFO") // INFO, WARNING, REMINDER, ERROR
+  priority    String    @default("MEDIUM") // LOW, MEDIUM, HIGH
+  read        Boolean   @default(false)
+  readAt      DateTime?
+  actionUrl   String?   // URL for the notification action
+  metadata    Json?     // Additional data for the notification
+  createdAt   DateTime  @default(now())
+  
+  // Fix: Add relation name to match User model
+  user        User      @relation("UserNotifications", fields: [userId], references: [id])
+
+  @@map("notifications")
 }
 
 
@@ -481,6 +672,50 @@ model ReportTemplate {
   createdAt   DateTime       @default(now())
   
   @@map("report_templates")
+}
+
+model Task {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  taskType    TaskType
+  assignedTo  Int       // User ID
+  assignedById Int      // User ID who assigned the task
+  dueDate     DateTime
+  priority    Priority  @default(MEDIUM)
+  status      TaskStatus @default(NOT_STARTED)
+  remarks     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  assignedUser   User   @relation("AssignedTasks", fields: [assignedTo], references: [id])
+  assignedByUser User   @relation("CreatedTasks", fields: [assignedById], references: [id])
+}
+
+enum TaskType {
+  VENDOR_REVIEW
+  RFQ_EVALUATION
+  CONTRACT_REVIEW
+  IPC_PROCESSING
+  DOCUMENT_VERIFICATION
+  PROJECT_FOLLOWUP
+  GENERAL
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
 }
 
 // Report Categories Enum
@@ -580,9 +815,38 @@ enum IPCStatus {
   REJECTED
 }
 
+// Enums for new functionality
+enum SignatureStatus {
+  NOT_REQUIRED
+  PENDING_SIGNATURE
+  SIGNED
+  REJECTED
+  EXPIRED
+}
+
+enum DocumentApprovalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+// Enums for approval system
+enum ApprovalInstanceStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CANCELLED
+  ESCALATED
+}
+
 enum ApprovalStatus {
   PENDING
   APPROVED
   REJECTED
+  RETURNED
   ESCALATED
 }
