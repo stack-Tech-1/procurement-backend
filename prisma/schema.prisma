@@ -7,6 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
 model User {
   id              Int      @id @default(autoincrement())
   uuid            String   @unique @default(uuid())
@@ -25,7 +26,10 @@ model User {
   department      String?
   lastLoginDate   DateTime? 
 
-  approvals       Approval[]
+  // FIXED: Add relation names to distinguish between approvals
+  approvals       Approval[]  @relation("UserApprovals") // Approvals where user is the approver
+  requestedApprovals Approval[] @relation("UserRequestedApprovals") // Approvals requested by user
+  
   auditLogs       AuditLog[]      @relation("UserAuditLogs")
   documents       Document[]      @relation("uploadedBy")
   evaluations     Evaluation[]    @relation("UserEvaluations")
@@ -48,12 +52,27 @@ model User {
   tasksAssigned   Task[] @relation("AssignedTasks") // Inverse for 'assignedUser'
   tasksCreated    Task[] @relation("CreatedTasks")  // Inverse for 'assignedByUser'
 
-     // 👇 ADD: New relations for document management
+  // 👇 ADD: New relations for document management
   signedDocuments Document[] @relation("SignedDocuments")
   documentApprovals DocumentApproval[] @relation("DocumentApprovalApprover")
   createdTemplates DocumentTemplate[] @relation("DocumentTemplateCreator")
-  approvalActions ApprovalAction[] @relation("ApprovalActionApprover") // 👈 ADD THIS
+  approvalActions ApprovalAction[] @relation("ApprovalActionApprover")
+
+  // Add to your User model
+  signatureRequestsCreated SignatureRequest[] @relation("SignatureRequestRequester")
+  signatureRequestsSigned  SignatureRequest[] @relation("SignatureRequestSigner")
+
+  // 👇 ADD THIS: Inverse relation for ApprovalWorkflow
+  createdApprovalWorkflows ApprovalWorkflow[] @relation("ApprovalWorkflowCreator")
+  // 👇 ADD THIS: Inverse relation for ApprovalStep
+  approvalSteps ApprovalStep[] @relation("ApprovalStepApprover")
+
+  // REMOVED: These duplicate relations (they're already defined above with proper relation names)
+  // createdWorkflows ApprovalWorkflow[]  // DUPLICATE - use createdApprovalWorkflows
+  // requestedApprovals Approval[]        // DUPLICATE - already defined above
+  // approvedSteps    ApprovalStep[]      // DUPLICATE - use approvalSteps
 }
+
 
 model Role {
   id    Int     @id @default(autoincrement())
@@ -400,6 +419,9 @@ model Document {
 
   // Add this relation at the end:
   documentApprovals DocumentApproval[] @relation("DocumentApprovals")
+
+  // 👇 ADD THIS: Inverse relation for SignatureRequest
+  signatureRequests SignatureRequest[] @relation("DocumentSignatureRequests")
   
   // Document metadata for search
   tags           String[]
@@ -469,16 +491,84 @@ model DocumentTemplate {
 }
 
 model Approval {
-  id         Int            @id @default(autoincrement())
-  entityType String
-  entityId   Int
-  approverId Int
-  sequence   Int
-  status     ApprovalStatus @default(PENDING)
-  comment    String?
-  createdAt  DateTime       @default(now())
-  actedAt    DateTime?
-  approver   User           @relation(fields: [approverId], references: [id])
+  id           String   @id @default(cuid())
+  entityType   String   // VENDOR, RFQ, CONTRACT, PO, etc.
+  entityId     String
+  status       ApprovalStatus @default(PENDING)
+  sequence     Int?     // Add this field - it was missing
+  comments     String?
+  
+  // Relations - UPDATED with relation names
+  requestedById Int
+  requestedBy   User    @relation("UserRequestedApprovals", fields: [requestedById], references: [id]) // <-- ADD RELATION NAME
+  approverId    Int?
+  approver      User?   @relation("UserApprovals", fields: [approverId], references: [id]) // <-- ADD RELATION NAME
+  
+  // Advanced workflow fields
+  workflowId        String?
+  workflow          ApprovalWorkflow? @relation(fields: [workflowId], references: [id])
+  currentStep      Int     @default(0)
+  totalSteps       Int     @default(1)
+  stepRequirements Json?
+  parallelApprovals Boolean @default(false)
+  escalationLevel  Int?
+  slaDeadline      DateTime?
+  slaBreached      Boolean @default(false)
+  
+  // Timestamps
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relations
+  steps    ApprovalStep[]
+  
+  @@map("Approval")
+  @@index([entityType, entityId])
+  @@index([status])
+  @@index([requestedById])
+}
+
+// Add these models to your existing schema
+model ApprovalWorkflow {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(255)
+  description String?
+  entityType  String   @db.VarChar(50) // VENDOR, RFQ, CONTRACT, PO, etc.
+  conditions  Json?
+  steps       Json
+  isActive    Boolean  @default(true)
+  createdById Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User    @relation("ApprovalWorkflowCreator", fields: [createdById], references: [id]) // <--- ADD RELATION NAME
+  approvals Approval[]
+
+  @@map("ApprovalWorkflow")
+}
+
+model ApprovalStep {
+  id           String         @id @default(cuid())
+  approvalId   String         // <-- CHANGED BACK TO String to match Approval.id
+  stepNumber   Int
+  stepName     String         @db.VarChar(255)
+  approverRole Int
+  approverId   Int?
+  status       ApprovalStatus @default(PENDING)
+  comments     String?
+  approvedAt   DateTime?
+  escalatedAt  DateTime?
+  slaDeadline  DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  approval Approval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  approver User?    @relation("ApprovalStepApprover", fields: [approverId], references: [id])
+
+  @@map("ApprovalStep")
+  @@index([approvalId])
+  @@index([approverId])
+  @@index([status])
 }
 
 // Approval Workflow Templates
@@ -551,7 +641,10 @@ model ApprovalAction {
   instance    ApprovalInstance @relation(fields: [instanceId], references: [id])
   step        ApprovalWorkflowStep @relation("ApprovalWorkflowStepActions", fields: [stepId], references: [id]) // 👈 ADD RELATION NAME
   approver    User           @relation("ApprovalActionApprover", fields: [approverId], references: [id]) // 👈 ADD RELATION NAME
-  
+
+  // 👇 ADD THIS: Inverse relation for SignatureRequest
+  signatureRequests SignatureRequest[] @relation("ApprovalActionSignatureRequests")
+    
   @@unique([instanceId, stepId])
   @@map("approval_actions")
 }
@@ -691,6 +784,37 @@ model Task {
   // Relations
   assignedUser   User   @relation("AssignedTasks", fields: [assignedTo], references: [id])
   assignedByUser User   @relation("CreatedTasks", fields: [assignedById], references: [id])
+}
+
+model SignatureRequest {
+  id                String   @id @default(uuid())
+  approvalActionId  String
+  documentId        Int
+  requesterId       Int
+  signerId          Int?
+  status            SignatureRequestStatus @default(PENDING)
+  signatureData     Json?    // Stores signature image/data
+  ipAddress         String?  // IP address where signed
+  expiresAt         DateTime
+  signedAt          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations - FIXED: Added relation names
+  approvalAction ApprovalAction @relation("ApprovalActionSignatureRequests", fields: [approvalActionId], references: [id], onDelete: Cascade)
+  document       Document       @relation("DocumentSignatureRequests", fields: [documentId], references: [id])
+  requester      User           @relation("SignatureRequestRequester", fields: [requesterId], references: [id])
+  signer         User?          @relation("SignatureRequestSigner", fields: [signerId], references: [id])
+
+  @@unique([approvalActionId, documentId])
+  @@map("signature_requests")
+}
+
+enum SignatureRequestStatus {
+  PENDING
+  SIGNED
+  EXPIRED
+  CANCELLED
 }
 
 enum TaskType {

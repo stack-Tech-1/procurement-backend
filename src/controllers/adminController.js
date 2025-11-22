@@ -1,5 +1,6 @@
 import prisma from "../config/prismaClient.js";
 
+
 /**
  * Approve a pending user.
  * PUT /api/admin/approve/:id

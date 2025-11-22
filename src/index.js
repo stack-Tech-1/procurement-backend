@@ -31,6 +31,9 @@ import documentRoutes from './routes/documents.js';
 import approvalWorkflowRoutes from './routes/approvalWorkflows.js';
 import { initializeDefaultRoles } from './scripts/initializeRoles.js';
 import approvalWorkflowService from './services/approvalWorkflowService.js';
+import signatureRoutes from './routes/signatureRoutes.js';
+import advancedApprovalRoutes from './routes/advancedApprovalRoutes.js';
+
 
 
 dotenv.config();
@@ -70,6 +73,8 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/approvals', approvalWorkflowRoutes);
+app.use('/api/signatures', signatureRoutes);
+app.use('/api/advanced-approvals', advancedApprovalRoutes);
 
 
 
