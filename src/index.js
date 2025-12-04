@@ -40,7 +40,7 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: ["https://main.dwotf13xzdq3t.amplifyapp.com"], // your frontend's dev URL
+  origin: ["https://main.dwotf13xzdq3t.amplifyapp.com", "https://main.d3bob118rkl74z.amplifyapp.com"], // your frontend's dev URL
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
