@@ -18,7 +18,7 @@ router.post('/verify-captcha', async (req, res) => {
     
     console.log("Verifying CAPTCHA token:", captchaToken ? "Token exists" : "No token");
     
-    // Development bypass (temporaryrr)
+    // Development bypass (temporary)
     if (process.env.NODE_ENV === 'development') {
       if (captchaToken === 'test-token-localhost' || 
           captchaToken.includes('test') ||
