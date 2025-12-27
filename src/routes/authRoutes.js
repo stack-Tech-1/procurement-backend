@@ -1,4 +1,5 @@
 import express from "express";
+import fetch from "node-fetch";
 import { register, login } from "../controllers/authController.js";
 import { getPendingUsers, approveUser } from "../controllers/authController.js";
 
