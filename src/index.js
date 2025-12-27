@@ -33,8 +33,7 @@ import { initializeDefaultRoles } from './scripts/initializeRoles.js';
 import approvalWorkflowService from './services/approvalWorkflowService.js';
 import signatureRoutes from './routes/signatureRoutes.js';
 import advancedApprovalRoutes from './routes/advancedApprovalRoutes.js';
-
-
+import analyticsRoutes from './routes/analytics.js';
 
 dotenv.config();
 const app = express();
@@ -75,6 +74,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/approvals', approvalWorkflowRoutes);
 app.use('/api/signatures', signatureRoutes);
 app.use('/api/advanced-approvals', advancedApprovalRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 
 
