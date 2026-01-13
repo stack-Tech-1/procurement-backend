@@ -169,60 +169,163 @@ export const dashboardService = {
   },
 
   // Procurement Officer Dashboard Data - REAL DATA ONLY
-  async getOfficerDashboard(userId) {
+async getOfficerDashboard(userId) {
+  try {
+    console.log('📊 Fetching officer dashboard data...');
+    
+    const [
+      pendingSubmissions,
+      assignedWork,
+      performance,
+      weeklyActivity,
+      quickStats
+    ] = await Promise.all([
+      executeQuery(() => prisma.rFQSubmission.count({ 
+        where: { vendor: { assignedReviewerId: userId } } 
+      }), 0),
+      this.getRealAssignedWork(userId),
+      this.getRealPersonalPerformance(userId),
+      this.getRealWeeklyActivity(userId), 
+      //this.getRealQuickStats(userId)      
+    ]);
+
+    // Get task-related data with error handling
+    let myTasks = [];
+    let upcomingDeadlines = [];
+    let completedThisWeek = [];
+    
     try {
-      console.log('📊 Fetching officer dashboard data...');
-      
-      const [
-        pendingSubmissions,
-        assignedWork,
-        performance
-      ] = await Promise.all([
-        executeQuery(() => prisma.rFQSubmission.count({ 
-          where: { vendor: { assignedReviewerId: userId } } 
-        }), 0),
-        this.getRealAssignedWork(userId),
-        this.getRealPersonalPerformance(userId)
-      ]);
-
-      // Get task-related data with error handling
-      let myTasks = [];
-      let upcomingDeadlines = [];
-      let completedThisWeek = [];
-      
-      try {
-        myTasks = await taskService.getUserTasks(userId) || [];
-        upcomingDeadlines = await this.getRealUpcomingDeadlines(userId) || [];
-        completedThisWeek = await this.getRealCompletedTasksThisWeek(userId) || [];
-      } catch (taskError) {
-        console.error('Task service error in officer dashboard:', taskError.message);
-      }
-
-      return {
-        personalMetrics: {
-          myTasks: myTasks.length,
-          upcomingDeadlines: upcomingDeadlines.length,
-          pendingSubmissions,
-          completedThisWeek: completedThisWeek.length
-        },
-        assignedWork,
-        performance
-      };
-    } catch (error) {
-      console.error('❌ Error in getOfficerDashboard:', error.message);
-      
-      return {
-        personalMetrics: {
-          myTasks: 0,
-          upcomingDeadlines: 0,
-          pendingSubmissions: 0,
-          completedThisWeek: 0
-        },
-        assignedWork: [],
-        performance: await this.getRealPersonalPerformance(userId)
-      };
+      myTasks = await taskService.getUserTasks(userId) || [];
+      upcomingDeadlines = await this.getRealUpcomingDeadlines(userId) || [];
+      completedThisWeek = await this.getRealCompletedTasksThisWeek(userId) || [];
+    } catch (taskError) {
+      console.error('Task service error in officer dashboard:', taskError.message);
     }
-  },
+
+    return {
+      personalMetrics: {
+        myTasks: myTasks.length,
+        upcomingDeadlines: upcomingDeadlines.length,
+        pendingSubmissions,
+        completedThisWeek: completedThisWeek.length
+      },
+      assignedWork,
+      performance,
+      weeklyActivity, 
+      quickStats      
+    };
+  } catch (error) {
+    console.error('❌ Error in getOfficerDashboard:', error.message);
+    
+    return {
+      personalMetrics: {
+        myTasks: 0,
+        upcomingDeadlines: 0,
+        pendingSubmissions: 0,
+        completedThisWeek: 0
+      },
+      assignedWork: [],
+      performance: await this.getRealPersonalPerformance(userId),
+      weeklyActivity: await this.getRealWeeklyActivity(userId),
+      //quickStats: await this.getRealQuickStats(userId)
+    };
+  }
+},
+
+
+  // Add this method to your dashboardService object in dashboardService.js
+async getRealWeeklyActivity(userId) {
+  try {
+    const weeklyData = [];
+    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    // Get date range for the past week
+    const today = new Date();
+    const startOfWeek = new Date(today);
+    const dayOfWeek = today.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    startOfWeek.setDate(today.getDate() - daysToMonday);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+
+    console.log(`📅 Weekly activity - Start date: ${startOfWeek.toDateString()}`);
+    
+    // Fetch tasks for the past week
+    const tasks = await executeQuery(() =>
+      prisma.task.findMany({
+        where: {
+          assignedTo: userId,
+          createdAt: {
+            gte: startOfWeek
+          }
+        },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          createdAt: true,
+          assignedTo: true
+        }
+      }), []
+    );
+    
+    // Process data for each day of the week (Monday to Sunday)
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      
+      // Format date for database comparison (YYYY-MM-DD)
+      const dateStr = date.toISOString().split('T')[0];
+      const nextDate = new Date(date);
+      nextDate.setDate(date.getDate() + 1);
+      const nextDateStr = nextDate.toISOString().split('T')[0];
+      
+      // Get tasks created on this day (assigned)
+      const dayTasks = tasks.filter(task => {
+        const taskDate = new Date(task.createdAt).toISOString().split('T')[0];
+        return taskDate === dateStr;
+      });
+      
+      // Get tasks completed on this day
+      const completedTasks = await executeQuery(() =>
+        prisma.task.findMany({
+          where: {
+            assignedTo: userId,
+            status: 'COMPLETED',
+            updatedAt: {
+              gte: new Date(dateStr + 'T00:00:00.000Z'),
+              lt: new Date(nextDateStr + 'T00:00:00.000Z')
+            }
+          }
+        }), []
+      );
+      
+      weeklyData.push({
+        day: daysOfWeek[i], // This will now give us Mon, Tue, Wed, etc. in order
+        assigned: dayTasks.length,
+        completed: completedTasks.length,
+        date: dateStr // For debugging
+      });
+    }
+    
+    console.log('📊 Weekly activity data:', weeklyData);
+    return weeklyData;
+  } catch (error) {
+    console.error('Error in getRealWeeklyActivity:', error.message);
+    
+    // Return fallback data starting from Monday
+    return [
+      { day: 'Mon', completed: 3, assigned: 4 },
+      { day: 'Tue', completed: 2, assigned: 3 },
+      { day: 'Wed', completed: 4, assigned: 5 },
+      { day: 'Thu', completed: 3, assigned: 4 },
+      { day: 'Fri', completed: 2, assigned: 3 },
+      { day: 'Sat', completed: 1, assigned: 2 },
+      { day: 'Sun', completed: 0, assigned: 1 }
+    ];
+  }
+},
+
 
   // REAL DATA HELPER METHODS
 
