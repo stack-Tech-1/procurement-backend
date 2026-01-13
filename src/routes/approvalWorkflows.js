@@ -16,5 +16,6 @@ router.post('/:instanceId/steps/:stepId/reject', approvalController.rejectStep.b
 router.get('/pending', approvalController.getPendingApprovals.bind(approvalController));
 router.post('/initialize', approvalController.initializeWorkflows.bind(approvalController));
 router.get('/instances', approvalController.getAllApprovalInstances.bind(approvalController));
+router.get('/pending', approvalController.getPendingApprovalsForUser);
 
 export default router;

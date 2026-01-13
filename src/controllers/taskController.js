@@ -33,6 +33,31 @@ export const taskController = {
     }
   },
 
+  // Get task statistics for dashboard - SIMPLIFIED
+  async getTaskStatistics(req, res) {
+    try {
+      const { id: userId, roleId } = req.user;
+      
+      console.log(`📊 Getting task statistics for user ${userId}, role ${roleId}`);
+      
+      const stats = await taskService.getTaskStatistics(userId, roleId);
+
+      res.json({
+        success: true,
+        data: stats,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('❌ Error getting task statistics:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch task statistics',
+        error: error.message
+      });
+    }
+  },
+
+
   // Create a new task
   async createTask(req, res) {
     try {
@@ -85,26 +110,7 @@ export const taskController = {
         message: 'Failed to update task status'
       });
     }
-  },
-
-  // Get task statistics for dashboard
-  async getTaskStatistics(req, res) {
-    try {
-      const { userId, roleId } = req.user;
-      const stats = await taskService.getTaskStatistics(userId, roleId);
-
-      res.json({
-        success: true,
-        data: stats
-      });
-    } catch (error) {
-      console.error('Error getting task statistics:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch task statistics'
-      });
-    }
-  },
+  },  
 
   // Assign task to team member (Manager only)
   async assignTask(req, res) {

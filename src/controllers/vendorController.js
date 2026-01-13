@@ -9,48 +9,60 @@ const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'vendor-documents'
  * GET /api/vendors/:id
  */
 export const getVendorDetails = async (req, res) => {
-  const { id } = req.params;
+    const { id } = req.params;
+    
+    // FIX: Add validation for the ID parameter
+    if (!id) {
+      return res.status(400).json({ error: 'Vendor ID is required' });
+    }
+    
+    // FIX: Ensure ID is a valid number
+    const vendorId = parseInt(id);
+    if (isNaN(vendorId)) {
+      return res.status(400).json({ error: 'Invalid vendor ID' });
+    }
+    
+    // FIX: Add this debug log to see what's being received
+    console.log('🔍 Fetching vendor details for ID:', vendorId);
+    
+    // Authorization check (Ensure only Procurement/Admin/Vendor can access their own)
+    // ... (Your existing authorization logic)
   
-  // Authorization check (Ensure only Procurement/Admin/Vendor can access their own)
-  // ... (Your existing authorization logic)
-
-  try {
-      const vendor = await prisma.vendor.findUnique({
-          where: { id: parseInt(id) },
-          include: {
-              documents: true, 
-              projectExperience: true, 
-              // ✅ NEW: Include Categories (Many-to-Many)
-              categories: {
-                  include: {
-                      category: {
-                          select: {
-                              id: true,
-                              name: true,
-                              csiCode: true,
-                              description: true,
-                          }
-                      }
-                  }
-              },
-              // ✅ NEW: Include Reviewer Info
-              assignedReviewer: { select: { id: true, name: true, email: true } },
-              lastReviewedBy: { select: { id: true, name: true, email: true } },
-              user: {
-                  select: { 
-                      name: true, 
-                      email: true, 
-                      jobTitle: true, 
-                      department: true,
-                  }
-              },
-              // ... other relations you need
-          },
-      });
-
-      if (!vendor) {
-          return res.status(404).json({ error: 'Vendor not found.' });
-      }
+    try {
+        // FIX: Use the parsed vendorId
+        const vendor = await prisma.vendor.findUnique({
+            where: { id: vendorId },  // Use the parsed integer
+            include: {
+                documents: true, 
+                projectExperience: true, 
+                categories: {
+                    include: {
+                        category: {
+                            select: {
+                                id: true,
+                                name: true,
+                                csiCode: true,
+                                description: true,
+                            }
+                        }
+                    }
+                },
+                assignedReviewer: { select: { id: true, name: true, email: true } },
+                lastReviewedBy: { select: { id: true, name: true, email: true } },
+                user: {
+                    select: { 
+                        name: true, 
+                        email: true, 
+                        jobTitle: true, 
+                        department: true,
+                    }
+                },
+            },
+        });
+  
+        if (!vendor) {
+            return res.status(404).json({ error: 'Vendor not found.' });
+        }
 
       // --- NEW LOGIC: Flatten Categories and Map Storage Paths to Public URLs ---
       // 1. Flatten the categories array (convert VendorToCategory[] to Category[])
@@ -97,6 +109,45 @@ export const getVendorDetails = async (req, res) => {
       res.status(500).json({ error: 'Failed to fetch vendor details.' });
   }
 };
+
+
+
+
+/** * Get Vendor Statistics for Dashboard
+ * GET /api/vendors/stats
+ * Accessible by Admin and Procurement roles.
+ * Returns total suppliers, qualified suppliers, under evaluation, rejected/blacklisted counts.
+ * Also returns percentage of qualified suppliers.
+ * */
+export const getVendorStats = async (req, res) => {
+    try {
+      const [
+        totalSuppliers,
+        qualifiedSuppliers,
+        underEvaluation,
+        rejectedBlacklisted
+      ] = await Promise.all([
+        prisma.vendor.count(),
+        prisma.vendor.count({ where: { status: 'APPROVED', isQualified: true } }),
+        prisma.vendor.count({ where: { status: 'UNDER_REVIEW' } }),
+        prisma.vendor.count({ where: { status: { in: ['REJECTED', 'BLACKLISTED'] } } })
+      ]);
+  
+      res.json({
+        success: true,
+        data: {
+          totalSuppliers,
+          qualifiedSuppliers,
+          underEvaluation,
+          rejectedBlacklisted,
+          qualifiedPercentage: Math.round((qualifiedSuppliers / Math.max(totalSuppliers, 1)) * 100)
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching vendor stats:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
 
 
 

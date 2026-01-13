@@ -145,6 +145,44 @@ export class ApprovalWorkflowController {
 
 
 
+  // Add to ApprovalWorkflowController class
+async getPendingApprovalsForUser(req, res) {
+  try {
+    const userId = req.user.id;
+    
+    const pendingApprovals = await prisma.approvalAction.findMany({
+      where: { 
+        approverId: userId,
+        status: 'PENDING'
+      },
+      include: {
+        instance: {
+          include: {
+            workflow: true
+          }
+        },
+        step: true,
+        approver: {
+          select: { name: true, email: true }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    res.json({
+      success: true,
+      data: pendingApprovals
+    });
+  } catch (error) {
+    console.error('Error fetching pending approvals:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
+
 
 
   // Get all approval instances
