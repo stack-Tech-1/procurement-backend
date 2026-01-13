@@ -233,6 +233,529 @@ async getOfficerDashboard(userId) {
 },
 
 
+// Add this method to dashboardService
+async getVendorDashboard(vendorId) {
+  try {
+    console.log(`📊 Fetching vendor dashboard data for vendor ${vendorId} (user ID)...`);
+    
+     // Get vendor info
+     const vendorInfo = await executeQuery(() =>
+      prisma.vendor.findUnique({
+        where: { userId: vendorId },
+        select: {
+          id: true,
+          companyLegalName: true,
+          status: true,
+          qualificationScore: true,
+          vendorClass: true,
+          createdAt: true,
+          updatedAt: true,
+          lastReviewedAt: true,
+          nextReviewDate: true
+        }
+      }), null
+    );
+
+    console.log(`🔍 Found vendor:`, vendorInfo);
+    console.log(`🔍 Vendor database ID: ${vendorInfo?.id}, User ID passed: ${vendorId}`);
+
+    if (!vendorInfo) {
+      throw new Error('Vendor not found');
+    }
+
+    // Get real proposals/submissions
+    const proposals = await executeQuery(() =>
+      prisma.rFQSubmission.findMany({
+        where: { vendorId: vendorInfo.id },
+        include: {
+          rfq: {
+            select: {
+              rfqNumber: true,
+              title: true,
+              description: true,
+              dueDate: true,
+              estimatedUnitPrice: true
+            }
+          },
+          evaluations: {
+            select: {
+              technicalScore: true,
+              financialScore: true,
+              totalScore: true,
+              comments: true
+            }
+          }
+        },
+        orderBy: { submittedAt: 'desc' },
+        take: 10
+      }), []
+    );
+
+    // Format proposals data
+    const formattedProposals = proposals.map(submission => ({
+      id: submission.id,
+      rfqRef: submission.rfq?.rfqNumber || 'N/A',
+      title: submission.rfq?.title || 'Unknown RFQ',
+      date: submission.submittedAt,
+      status: this.getProposalStatus(submission.status),
+      stage: this.getProposalStage(submission.status),
+      value: submission.totalValue || 0,
+      deadline: submission.rfq?.dueDate
+    }));
+
+    // Get performance metrics - FIXED: Use getRealVendorPerformance(vendorId) not getRealVendorPerformance()
+    const performance = await this.getRealVendorPerformance(vendorInfo.id);
+    
+    // Get document status
+    const documents = await this.getRealVendorDocumentStatus(vendorInfo.id);
+    
+    // Get new RFQs for this vendor's categories
+    const newRFQs = await this.getNewRFQsForVendor(vendorInfo.id);
+    
+    // Get alerts
+    const alerts = await this.getVendorAlerts(vendorInfo.id);
+    
+    // Calculate profile completion
+    const profileCompletion = await this.calculateVendorProfileCompletion(vendorInfo.id);
+
+    const advancedKPIs = await this.getAdvancedKPIs(vendorInfo.id);
+
+    return {
+      vendorInfo: {
+        ...vendorInfo,
+        companyName: vendorInfo.companyLegalName,
+        profileCompletion,
+        lastUpdated: vendorInfo.updatedAt,
+        vendorId: `VEND-${vendorInfo.id.toString().padStart(6, '0')}`
+      },
+      newRFQs: newRFQs.length,
+      proposals: formattedProposals,
+      performance, // This should now be an object, not an array
+      documents,
+      alerts,
+      advancedKPIs
+    };
+  } catch (error) {
+    console.error('❌ Error in getVendorDashboard:', error.message);
+    
+    // Return minimal real data with fallbacks
+    return {
+      vendorInfo: {
+        companyName: 'Unknown Vendor',
+        status: 'UNKNOWN',
+        qualificationScore: 0,
+        vendorClass: 'D',
+        profileCompletion: 0,
+        lastUpdated: new Date().toISOString(),
+        vendorId: 'VEND-000000'
+      },
+      newRFQs: 0,
+      proposals: [],
+      performance: { 
+        totalProposals: 0,
+        winRate: 0,
+        averageResponseTime: '0 days',
+        satisfactionScore: 0,
+        activeContracts: 0,
+        totalRevenue: 0
+      },
+      documents: {
+        valid: 0,
+        expiring: 0,
+        expired: 0,
+        missing: 0
+      },
+      alerts: [],
+      advancedKPIs: {
+        deliveryCompliance: 0,
+        technicalScore: 0,
+        financialScore: 0,
+        contractTrend: 0
+      }
+    };
+  }
+},
+
+// Add to dashboardService.js
+async getAdvancedKPIs(vendorId) {
+  try {
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: vendorId },
+      include: {
+        submissions: {
+          include: {
+            evaluations: {
+              select: {
+                technicalScore: true,
+                financialScore: true,
+                experienceScore: true,
+                totalScore: true
+              }
+            }
+          }
+        },
+        contracts: {
+          select: {
+            id: true,
+            contractValue: true,
+            status: true,
+            startDate: true,
+            endDate: true
+          }
+        }
+      }
+    });
+
+    if (!vendor) return null;
+
+    // Calculate REAL technical score (from evaluations)
+    const allEvaluations = vendor.submissions.flatMap(s => s.evaluations);
+    const technicalScores = allEvaluations
+      .filter(e => e.technicalScore !== null)
+      .map(e => e.technicalScore);
+    const technicalScore = technicalScores.length > 0 
+      ? (technicalScores.reduce((a, b) => a + b, 0) / technicalScores.length) 
+      : 0;
+    
+    // Calculate REAL financial score (from evaluations)
+    const financialScores = allEvaluations
+      .filter(e => e.financialScore !== null)
+      .map(e => e.financialScore);
+    const financialScore = financialScores.length > 0 
+      ? (financialScores.reduce((a, b) => a + b, 0) / financialScores.length) 
+      : 0;
+    
+    // Calculate REAL delivery compliance (from contract completions)
+    // Calculate delivery compliance - simple version
+let deliveryCompliance = 0;
+const totalContracts = vendor.contracts.length;
+
+if (totalContracts > 0) {
+  // Count completed/successful contracts
+  const successfulContracts = vendor.contracts.filter(contract => {
+    if (!contract.status) return false;
+    
+    const status = contract.status.toUpperCase();
+    return status === 'COMPLETED' || 
+           status === 'CLOSED' || 
+           status === 'FULFILLED' ||
+           status === 'DELIVERED';
+  }).length;
+  
+  // Basic calculation: successful contracts / total contracts
+  deliveryCompliance = (successfulContracts / totalContracts) * 100;
+  
+  console.log(`Delivery compliance calculation:`);
+  console.log(`  Total contracts: ${totalContracts}`);
+  console.log(`  Successful contracts: ${successfulContracts}`);
+  console.log(`  Compliance: ${deliveryCompliance}%`);
+} else {
+  console.log('No contracts found for delivery compliance calculation');
+}
+    
+    // Calculate REAL contract trend (compare current vs previous period)
+    let contractTrend = 0;
+    if (vendor.contracts.length > 0) {
+      const now = new Date();
+      const sixMonthsAgo = new Date(now.setMonth(now.getMonth() - 6));
+      
+      const recentContracts = vendor.contracts.filter(c => 
+        c.startDate && new Date(c.startDate) >= sixMonthsAgo
+      ).length;
+      
+      const olderContracts = vendor.contracts.filter(c => 
+        c.startDate && new Date(c.startDate) < sixMonthsAgo
+      ).length;
+      
+      if (olderContracts > 0) {
+        contractTrend = ((recentContracts - olderContracts) / olderContracts) * 100;
+      }
+    }
+
+    return {
+      deliveryCompliance: Math.round(deliveryCompliance * 10) / 10, // Round to 1 decimal
+      technicalScore: Math.round(technicalScore * 10) / 10,
+      financialScore: Math.round(financialScore * 10) / 10,
+      contractTrend: Math.round(contractTrend)
+    };
+  } catch (error) {
+    console.error('Error calculating advanced KPIs:', error);
+    return {
+      deliveryCompliance: 0,
+      technicalScore: 0,
+      financialScore: 0,
+      contractTrend: 0
+    };
+  }
+},
+
+// Add these helper methods to dashboardService
+async getRealVendorPerformance(vendorId) {
+  try {
+    const [
+      totalProposals,
+      approvedProposals,
+      activeContracts,
+      totalRevenue
+    ] = await Promise.all([
+      executeQuery(() => prisma.rFQSubmission.count({ where: { vendorId } }), 0),
+      executeQuery(() => prisma.rFQSubmission.count({ 
+        where: { 
+          vendorId,
+          status: 'APPROVED' 
+        } 
+      }), 0),
+      executeQuery(() => prisma.contract.count({ 
+        where: { 
+          vendorId,
+          status: { not: 'COMPLETED' }
+        } 
+      }), 0),
+      executeQuery(() => prisma.contract.aggregate({
+        where: { vendorId },
+        _sum: { contractValue: true }
+      }), { _sum: { contractValue: 0 } })
+    ]);
+
+    const winRate = totalProposals > 0 ? (approvedProposals / totalProposals) * 100 : 0;
+
+    return {
+      totalProposals,
+      winRate: Math.round(winRate),
+      averageResponseTime: await this.calculateAverageResponseTime(vendorId),
+      satisfactionScore: await this.calculateVendorSatisfactionScore(vendorId),
+      activeContracts,
+      totalRevenue: totalRevenue._sum?.contractValue || 0
+    };
+  } catch (error) {
+    console.error('Error in getRealVendorPerformance:', error.message);
+    return {
+      totalProposals: 0,
+      winRate: 0,
+      averageResponseTime: '0 days',
+      satisfactionScore: 0,
+      activeContracts: 0,
+      totalRevenue: 0
+    };
+  }
+},
+
+async getRealVendorDocumentStatus(vendorId) {
+  try {
+    const documents = await executeQuery(() =>
+      prisma.vendorDocument.findMany({
+        where: { vendorId }
+      }), []
+    );
+
+    console.log(`Processing ${documents.length} documents for vendor ${vendorId}`);
+    
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    let valid = 0;
+    let expiring = 0;
+    let expired = 0;
+    
+    documents.forEach(doc => {
+      console.log(`Document: ${doc.docType}, Expiry: ${doc.expiryDate}, isValid: ${doc.isValid}`);
+      
+      if (!doc.expiryDate) {
+        // No expiry date
+        if (doc.isValid) {
+          valid++;
+        } else {
+          expired++;
+        }
+      } else {
+        // Has expiry date
+        const expiryStr = doc.expiryDate.toISOString().split('T')[0];
+        const expiryDate = new Date(expiryStr);
+        const isExpired = expiryDate <= new Date(todayStr);
+        
+        console.log(`  Expiry string: ${expiryStr}, Today: ${todayStr}, isExpired: ${isExpired}`);
+        
+        if (!doc.isValid || isExpired) {
+          expired++;
+          console.log(`  -> Counted as EXPIRED`);
+        } else {
+          // Check if expiring soon (within 30 days)
+          const daysUntilExpiry = Math.ceil((expiryDate - new Date(todayStr)) / (1000 * 60 * 60 * 24));
+          console.log(`  -> Days until expiry: ${daysUntilExpiry}`);
+          
+          if (daysUntilExpiry <= 30) {
+            expiring++;
+            console.log(`  -> Counted as EXPIRING`);
+          } else {
+            valid++;
+            console.log(`  -> Counted as VALID`);
+          }
+        }
+      }
+    });
+
+    // Calculate missing (simplified)
+    const missing = 0; // For now
+
+    console.log(`Final counts - Valid: ${valid}, Expiring: ${expiring}, Expired: ${expired}, Missing: ${missing}`);
+    
+    return {
+      valid,
+      expiring,
+      expired,
+      missing
+    };
+  } catch (error) {
+    console.error('Error in getRealVendorDocumentStatus:', error.message);
+    return { valid: 0, expiring: 0, expired: 0, missing: 0 };
+  }
+},
+
+getProposalStatus(submissionStatus) {
+  const statusMap = {
+    'DRAFT': 'Draft',
+    'SUBMITTED': 'Pending Review',
+    'UNDER_EVALUATION': 'Technical Evaluation',
+    'APPROVED': 'Approved',
+    'REJECTED': 'Rejected',
+    'AWARDED': 'Approved'
+  };
+  return statusMap[submissionStatus] || 'Unknown';
+},
+
+getProposalStage(submissionStatus) {
+  const stageMap = {
+    'DRAFT': 'Draft',
+    'SUBMITTED': 'Submitted',
+    'UNDER_EVALUATION': 'Technical Evaluation',
+    'APPROVED': 'Final Decision',
+    'REJECTED': 'Final Decision',
+    'AWARDED': 'Contract Negotiation'
+  };
+  return stageMap[submissionStatus] || 'Unknown';
+},
+
+// Add this method to dashboardService.js
+async getVendorAlerts(vendorId) {
+  try {
+    const alerts = [];
+    
+    // 1. Check for expiring documents
+    const expiringDocs = await prisma.vendorDocument.findMany({
+      where: {
+        vendorId: vendorId,
+        expiryDate: {
+          gt: new Date(),
+          lte: new Date(new Date().setDate(new Date().getDate() + 45))
+        },
+        isValid: true
+      },
+      select: {
+        docType: true,
+        expiryDate: true
+      }
+    });
+    
+    expiringDocs.forEach(doc => {
+      const daysUntilExpiry = Math.ceil((new Date(doc.expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+      alerts.push({
+        type: 'warning',
+        message: `${this.formatDocTypeName(doc.docType)} expires in ${daysUntilExpiry} days`,
+        action: 'Renew',
+        actionPath: '/vendor-dashboard/documents'
+      });
+    });
+    
+    // 2. Check for new RFQs in vendor's categories
+    const vendorCategories = await prisma.vendorToCategory.findMany({
+      where: { vendorId: vendorId },
+      include: { category: true }
+    });
+    
+    if (vendorCategories.length > 0) {
+      const categoryIds = vendorCategories.map(vc => vc.categoryId);
+      
+      const newRFQs = await prisma.rFQ.count({
+        where: {
+          status: { in: ['ISSUED', 'OPEN'] },
+          dueDate: { gt: new Date() }
+          // Note: You'll need to add category relationship to RFQ model
+          // OR create a separate RFQCategory table
+        }
+      });
+      
+      if (newRFQs > 0) {
+        alerts.push({
+          type: 'info',
+          message: `${newRFQs} new RFQ(s) available in your category`,
+          action: 'View',
+          actionPath: '/vendor-dashboard/proposal'
+        });
+      }
+    }
+    
+    // 3. Check profile completion
+    const profileCompletion = await this.calculateVendorProfileCompletion(vendorId);
+    if (profileCompletion < 100) {
+      alerts.push({
+        type: 'success',
+        message: `Your profile is ${profileCompletion}% complete`,
+        action: 'Complete',
+        actionPath: '/dashboard/vendors/profile'
+      });
+    }
+    
+    // 4. Check for expiring vendor status
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: vendorId },
+      select: { nextReviewDate: true }
+    });
+    
+    if (vendor?.nextReviewDate) {
+      const daysUntilReview = Math.ceil((new Date(vendor.nextReviewDate) - new Date()) / (1000 * 60 * 60 * 24));
+      if (daysUntilReview <= 30) {
+        alerts.push({
+          type: 'warning',
+          message: `Vendor review scheduled in ${daysUntilReview} days`,
+          action: 'Prepare',
+          actionPath: '/vendor-dashboard/profile'
+        });
+      }
+    }
+    
+    return alerts;
+  } catch (error) {
+    console.error('Error generating vendor alerts:', error);
+    return [];
+  }
+},
+
+formatDocTypeName(docType) {
+  // Convert ENUM to readable names
+  const docNames = {
+    'COMMERCIAL_REGISTRATION': 'Commercial Registration',
+    'ZAKAT_CERTIFICATE': 'Zakat Certificate',
+    'ISO_CERTIFICATE': 'ISO Certificate',
+    'SASO_SABER_CERTIFICATE': 'SASO Saber Certificate',
+    'HSE_PLAN': 'HSE Plan',
+    'WARRANTY_CERTIFICATE': 'Warranty Certificate',
+    'QUALITY_PLAN': 'Quality Plan',
+    'ORGANIZATION_CHART': 'Organization Chart',
+    'TECHNICAL_FILE': 'Technical File',
+    'FINANCIAL_FILE': 'Financial File',
+    'VAT_CERTIFICATE': 'VAT Certificate',
+    'GOSI_CERTIFICATE': 'GOSI Certificate',
+    'BANK_LETTER': 'Bank Letter',
+    'INSURANCE_CERTIFICATE': 'Insurance Certificate',
+    'INDUSTRY_LICENSE': 'Industry License',
+    'VENDOR_CODE_OF_CONDUCT': 'Vendor Code of Conduct',
+    'COMPANY_PROFILE': 'Company Profile'
+  };
+  
+  return docNames[docType] || docType.replace(/_/g, ' ');
+},
+
+
   // Add this method to your dashboardService object in dashboardService.js
 async getRealWeeklyActivity(userId) {
   try {
@@ -439,61 +962,248 @@ async getRealWeeklyActivity(userId) {
     }
   },
 
-  async getRealVendorPerformance() {
+
+  async getNewRFQsForVendor(vendorId) {
     try {
-      const vendors = await executeQuery(() =>
-        prisma.vendor.findMany({
-          where: { status: 'APPROVED' },
-          include: {
-            contracts: {
-              select: {
-                contractValue: true,
-                status: true
-              }
-            },
-            submissions: {
-              include: {
-                evaluations: {
-                  select: {
-                    totalScore: true
-                  }
-                }
-              }
-            }
+      // Get vendor categories
+      const vendorCategories = await executeQuery(() =>
+        prisma.vendorToCategory.findMany({
+          where: { vendorId },
+          select: { categoryId: true }
+        }), []
+      );
+  
+      if (vendorCategories.length === 0) return [];
+  
+      const categoryIds = vendorCategories.map(vc => vc.categoryId);
+      
+      // Get new RFQs (simplified - adjust based on your actual RFQ structure)
+      const newRFQs = await executeQuery(() =>
+        prisma.rFQ.findMany({
+          where: {
+            status: { in: ['ISSUED', 'OPEN'] },
+            dueDate: { gt: new Date() }
+            // Note: You'll need RFQ-category relationship to filter by category
           },
           take: 10
         }), []
       );
-
-      return vendors.map(vendor => {
-        const totalContracts = vendor.contracts.length;
-        const completedContracts = vendor.contracts.filter(c => c.status === 'COMPLETED').length;
-        const totalContractValue = vendor.contracts.reduce((sum, c) => sum + (c.contractValue || 0), 0);
-        
-        const allScores = vendor.submissions.flatMap(s => 
-          s.evaluations.map(e => e.totalScore).filter(score => score !== null)
-        );
-        const avgScore = allScores.length > 0 
-          ? allScores.reduce((sum, score) => sum + score, 0) / allScores.length 
-          : 0;
-
-        return {
-          name: vendor.companyLegalName || 'Unknown Vendor',
-          qualificationScore: vendor.qualificationScore || 0,
-          contractCount: totalContracts,
-          completedContracts,
-          totalValue: totalContractValue,
-          averageScore: Math.round(avgScore * 10) / 10,
-          winRate: vendor.submissions.length > 0 
-            ? Math.round((totalContracts / vendor.submissions.length) * 100) 
-            : 0
-        };
-      });
+  
+      return newRFQs;
     } catch (error) {
-      console.error('Error in getRealVendorPerformance:', error.message);
+      console.error('Error in getNewRFQsForVendor:', error);
       return [];
     }
-  },
+  },  
+  
+  // Add this method to dashboardService.js
+async calculateVendorProfileCompletion(vendorId) {
+  try {
+    // Get vendor details
+    const vendor = await prisma.vendor.findUnique({
+      where: { id: vendorId },
+      include: {
+        documents: true,
+        categories: true,
+        projectExperience: true
+      }
+    });
+
+    if (!vendor) return 0;
+
+    // Define scoring criteria and weights
+    const criteria = [
+      {
+        name: 'basic_info',
+        weight: 20,
+        check: () => {
+          const requiredFields = [
+            'companyLegalName', 'vendorType', 'businessType',
+            'licenseNumber', 'yearsInBusiness', 'gosiEmployeeCount',
+            'crNumber', 'contactPerson', 'contactPhone', 'contactEmail'
+          ];
+          const filledFields = requiredFields.filter(field => 
+            vendor[field] && vendor[field].toString().trim() !== ''
+          );
+          return (filledFields.length / requiredFields.length) * 100;
+        }
+      },
+      {
+        name: 'address_complete',
+        weight: 10,
+        check: () => {
+          const addressFields = [
+            'addressStreet', 'addressCity', 'addressRegion', 'addressCountry'
+          ];
+          const filledFields = addressFields.filter(field => 
+            vendor[field] && vendor[field].toString().trim() !== ''
+          );
+          return (filledFields.length / addressFields.length) * 100;
+        }
+      },
+      {
+        name: 'contact_details',
+        weight: 15,
+        check: () => {
+          const contactFields = [
+            'primaryContactName', 'primaryContactTitle',
+            'technicalContactName', 'financialContactName'
+          ];
+          const filledFields = contactFields.filter(field => 
+            vendor[field] && vendor[field].toString().trim() !== ''
+          );
+          return (filledFields.length / contactFields.length) * 100;
+        }
+      },
+      {
+        name: 'documents',
+        weight: 30,
+        check: () => {
+          if (!vendor.documents || vendor.documents.length === 0) return 0;
+          
+          const requiredDocTypes = [
+            'COMMERCIAL_REGISTRATION',
+            'VAT_CERTIFICATE',
+            'GOSI_CERTIFICATE'
+          ];
+          
+          const hasDocs = vendor.documents.filter(doc => 
+            doc.isValid && 
+            (!doc.expiryDate || new Date(doc.expiryDate) > new Date())
+          );
+          
+          // Check for essential documents
+          let essentialScore = 0;
+          requiredDocTypes.forEach(docType => {
+            if (vendor.documents.some(doc => doc.docType === docType)) {
+              essentialScore += 33.33; // 33.33% for each essential doc
+            }
+          });
+          
+          // Additional documents bonus (max 10%)
+          const additionalDocs = vendor.documents.length - requiredDocTypes.length;
+          const bonusScore = Math.min(10, additionalDocs * 2);
+          
+          return Math.min(100, essentialScore + bonusScore);
+        }
+      },
+      {
+        name: 'categories',
+        weight: 15,
+        check: () => {
+          if (!vendor.categories || vendor.categories.length === 0) return 0;
+          // At least one category selected = 100%
+          return 100;
+        }
+      },
+      {
+        name: 'project_experience',
+        weight: 10,
+        check: () => {
+          if (!vendor.projectExperience || vendor.projectExperience.length === 0) return 0;
+          // At least one project experience = 100%
+          return 100;
+        }
+      }
+    ];
+
+    // Calculate weighted score
+    let totalScore = 0;
+    let totalWeight = 0;
+
+    for (const criterion of criteria) {
+      const score = criterion.check();
+      totalScore += (score * criterion.weight);
+      totalWeight += criterion.weight;
+    }
+
+    const finalScore = totalWeight > 0 ? Math.round(totalScore / totalWeight) : 0;
+    return finalScore;
+  } catch (error) {
+    console.error('Error calculating vendor profile completion:', error);
+    return 0;
+  }
+},
+
+async calculateAverageResponseTime(vendorId) {
+  try {
+    const submissions = await prisma.rFQSubmission.findMany({
+      where: { vendorId },
+      include: {
+        rfq: {
+          select: { createdAt: true }
+        }
+      },
+      orderBy: { submittedAt: 'desc' },
+      take: 10
+    });
+
+    if (submissions.length === 0) return '0 days';
+
+    let totalHours = 0;
+    let count = 0;
+
+    submissions.forEach(submission => {
+      if (submission.submittedAt && submission.rfq?.createdAt) {
+        const rfqDate = new Date(submission.rfq.createdAt);
+        const submissionDate = new Date(submission.submittedAt);
+        const diffHours = (submissionDate - rfqDate) / (1000 * 60 * 60);
+        
+        if (diffHours > 0) {
+          totalHours += diffHours;
+          count++;
+        }
+      }
+    });
+
+    if (count === 0) return '0 days';
+
+    const avgHours = totalHours / count;
+    const avgDays = avgHours / 24;
+    
+    return avgDays < 1 
+      ? `${Math.round(avgHours)} hours` 
+      : `${avgDays.toFixed(1)} days`;
+  } catch (error) {
+    console.error('Error calculating average response time:', error);
+    return '0 days';
+  }
+},
+
+async calculateVendorSatisfactionScore(vendorId) {
+  try {
+    const evaluations = await prisma.evaluation.findMany({
+      where: {
+        submission: { vendorId }
+      },
+      select: {
+        technicalScore: true,
+        financialScore: true,
+        otherScore: true
+      }
+    });
+
+    if (evaluations.length === 0) return 0;
+
+    let totalScore = 0;
+    let count = 0;
+
+    evaluations.forEach(evaluation => {
+      const scores = [eval.technicalScore, eval.financialScore, eval.otherScore]
+        .filter(score => score !== null && score !== undefined);
+      
+      if (scores.length > 0) {
+        totalScore += scores.reduce((sum, score) => sum + score, 0) / scores.length;
+        count++;
+      }
+    });
+
+    return count > 0 ? Math.round((totalScore / count) * 10) / 10 : 0;
+  } catch (error) {
+    console.error('Error calculating satisfaction score:', error);
+    return 0;
+  }
+},
 
   async getRealProjectProgress() {
     try {

@@ -167,6 +167,7 @@ model Vendor {
 
   assignedReviewerId   Int?         // ADDED: ID of the internal user assigned to review
   lastReviewedById     Int?         // ADDED: ID of the last internal user to review
+   lastReviewedAt       DateTime?    @db.Timestamptz  
   nextReviewDate       DateTime?    // ADDED: Next scheduled review date
 
   // --- Relations ---

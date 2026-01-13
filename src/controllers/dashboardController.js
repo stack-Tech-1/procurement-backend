@@ -20,7 +20,7 @@ export const getDashboardData = async (req, res) => {
         dashboardData = await dashboardService.getOfficerDashboard(req.user.id);
         break;
       case ROLES.VENDOR:
-        dashboardData = { message: "Vendor dashboard data" };
+        dashboardData = await dashboardService.getVendorDashboard(req.user.id);
         break;
       default:
         return res.status(400).json({ 
