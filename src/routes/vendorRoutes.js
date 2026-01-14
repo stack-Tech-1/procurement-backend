@@ -8,8 +8,10 @@ import {
   getVendorDetails,
   getMyQualificationDetails,
   getFilteredVendorList,
+  updateVendorQualification
 } from "../controllers/vendorController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
+import upload from "../middleware/uploadMiddleware.js"; // ADD THIS IMPORT
 
 const router = express.Router();
 
@@ -44,7 +46,18 @@ router.get("/qualification/me", authenticateToken, getMyQualificationDetails);
 router.get('/list', authenticateToken, getFilteredVendorList);
 router.get('/stats', authenticateToken, getVendorStats);
 
+// Vendor qualification update - with file upload
+router.put(
+  '/qualification/update', 
+  authenticateToken, 
+  upload.fields([ // Use fields instead of array for multiple file types
+    { name: 'companyLogo', maxCount: 1 },
+    { name: 'files', maxCount: 20 } // For multiple document files
+  ]), 
+  updateVendorQualification
+);
 
 router.put("/:id", authenticateToken, adminUpdateVendor);
 router.get('/:id', authenticateToken, getVendorDetails);
+
 export default router;

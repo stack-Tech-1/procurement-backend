@@ -1,5 +1,6 @@
 import prisma from "../config/prismaClient.js";
-import { supabaseAdmin } from '../lib/supabaseAdmin.js'; 
+import { supabaseAdmin } from '../lib/supabaseAdmin.js';
+import path from 'path'; 
 
 const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'vendor-documents';
 
@@ -618,6 +619,269 @@ export const getFilteredVendorList = async (req, res) => {
 };
 
 
+/**
+ * Update Vendor Qualification (Vendor self-update)
+ * PUT /api/vendors/qualification/update
+ */
+export const updateVendorQualification = async (req, res) => {
+    try {
+      // 1. Ensure the user is a Vendor
+      if (req.user?.roleId !== 4) {
+        return res.status(403).json({ error: 'Access denied. Only Vendor users can update qualification.' });
+      }
+  
+      console.log('📤 Update request received:', {
+        body: req.body,
+        files: req.files,
+        user: req.user.id
+      });
+  
+      // 2. Parse form data
+      let vendorData;
+      try {
+        vendorData = req.body.vendorData ? JSON.parse(req.body.vendorData) : {};
+      } catch (parseError) {
+        return res.status(400).json({ 
+          error: 'Invalid vendor data format',
+          details: parseError.message 
+        });
+      }
+  
+      // 3. Find the vendor by userId
+      const vendor = await prisma.vendor.findUnique({
+        where: { userId: req.user.id },
+        include: {
+          documents: true,
+          projectExperience: true,
+          categories: {
+            include: {
+              category: true
+            }
+          }
+        }
+      });
+  
+      if (!vendor) {
+        return res.status(404).json({ error: 'Vendor profile not found.' });
+      }
+  
+      // 4. Prepare update data
+      const updateData = {
+        // Company Information
+        companyLegalName: vendorData.companyLegalName || vendor.companyLegalName,
+        vendorType: vendorData.vendorType || vendor.vendorType,
+        businessType: vendorData.businessType || vendor.businessType,
+        licenseNumber: vendorData.licenseNumber || vendor.licenseNumber,
+        yearsInBusiness: vendorData.yearsInBusiness ? parseInt(vendorData.yearsInBusiness) : vendor.yearsInBusiness,
+        gosiEmployeeCount: vendorData.gosiEmployeeCount ? parseInt(vendorData.gosiEmployeeCount) : vendor.gosiEmployeeCount,
+        chamberClass: vendorData.chamberClass || vendor.chamberClass,
+        chamberRegion: vendorData.chamberRegion || vendor.chamberRegion,
+        
+        // Contact Information
+        contactPerson: vendorData.contactPerson || vendor.contactPerson,
+        contactPhone: vendorData.contactPhone || vendor.contactPhone,
+        contactEmail: vendorData.contactEmail || vendor.contactEmail,
+        website: vendorData.website || vendor.website,
+        addressStreet: vendorData.addressStreet || vendor.addressStreet,
+        addressCity: vendorData.addressCity || vendor.addressCity,
+        addressRegion: vendorData.addressRegion || vendor.addressRegion,
+        addressCountry: vendorData.addressCountry || vendor.addressCountry,
+        primaryContactName: vendorData.primaryContactName || vendor.primaryContactName,
+        primaryContactTitle: vendorData.primaryContactTitle || vendor.primaryContactTitle,
+        technicalContactName: vendorData.technicalContactName || vendor.technicalContactName,
+        technicalContactEmail: vendorData.technicalContactEmail || vendor.technicalContactEmail,
+        financialContactName: vendorData.financialContactName || vendor.financialContactName,
+        financialContactEmail: vendorData.financialContactEmail || vendor.financialContactEmail,
+        
+        // Products & Services
+        productsAndServices: vendorData.productsAndServices || vendor.productsAndServices,
+        
+        // Reset status to under review when updating
+        status: 'UNDER_REVIEW',
+        reviewStatus: 'Needs Review',
+        lastReviewedAt: new Date(),
+      };
+  
+      // 5. Handle categories if provided
+      if (vendorData.categories && Array.isArray(vendorData.categories)) {
+        updateData.categories = {
+          deleteMany: {},
+          create: vendorData.categories.map(categoryId => ({
+            category: { connect: { id: Number(categoryId) } }
+          }))
+        };
+      }
+  
+      // 6. Handle logo upload if present
+      if (req.files && req.files.companyLogo && req.files.companyLogo[0]) {
+        const logoFile = req.files.companyLogo[0];
+        console.log('📷 Processing logo upload:', {
+          originalName: logoFile.originalname,
+          size: logoFile.size,
+          mimetype: logoFile.mimetype
+        });
+  
+        const logoFileName = `vendor-${vendor.id}-logo-${Date.now()}${path.extname(logoFile.originalname)}`;
+        
+        try {
+          // Upload to Supabase storage
+          const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+            .from(STORAGE_BUCKET)
+            .upload(`logos/${logoFileName}`, logoFile.buffer, {
+              contentType: logoFile.mimetype,
+              cacheControl: '3600',
+              upsert: true
+            });
+  
+          if (uploadError) {
+            console.error('❌ Logo upload error:', uploadError);
+            throw new Error(`Failed to upload logo: ${uploadError.message}`);
+          }
+  
+          const { data: publicUrlData } = supabaseAdmin.storage
+            .from(STORAGE_BUCKET)
+            .getPublicUrl(`logos/${logoFileName}`);
+          
+          updateData.logo = publicUrlData.publicUrl;
+          console.log('✅ Logo uploaded successfully:', updateData.logo);
+  
+        } catch (logoError) {
+          console.error('❌ Error processing logo:', logoError);
+          return res.status(500).json({ 
+            error: 'Failed to process logo upload',
+            details: logoError.message 
+          });
+        }
+      }
+  
+      // 7. Update vendor in database
+      const updatedVendor = await prisma.vendor.update({
+        where: { id: vendor.id },
+        data: updateData,
+        include: {
+          documents: true,
+          projectExperience: true,
+          categories: {
+            include: {
+              category: true
+            }
+          }
+        }
+      });
+  
+      // 8. Handle document updates (if files are provided)
+      if (req.files && req.files.files && vendorData.documentData) {
+        // Note: You'll need to map file names to document types
+        // This is a simplified version - you'll need to adapt based on your frontend form structure
+        console.log('📄 Processing document uploads:', req.files.files.length, 'files');
+        
+        // Process each uploaded file
+        for (const file of req.files.files) {
+          const fileName = `vendor-${vendor.id}-${Date.now()}-${file.originalname}`;
+          
+          try {
+            const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+              .from(STORAGE_BUCKET)
+              .upload(`documents/${fileName}`, file.buffer, {
+                contentType: file.mimetype,
+                cacheControl: '3600'
+              });
+  
+            if (!uploadError) {
+              const { data: publicUrlData } = supabaseAdmin.storage
+                .from(STORAGE_BUCKET)
+                .getPublicUrl(`documents/${fileName}`);
+  
+              // You'll need to determine which document type this file belongs to
+              // This depends on how your frontend sends the files
+              console.log('✅ Document uploaded:', file.originalname);
+            }
+          } catch (docError) {
+            console.error('❌ Error uploading document:', docError);
+          }
+        }
+      }
+  
+      // 9. Handle project experience updates
+      if (vendorData.projectExperience && Array.isArray(vendorData.projectExperience)) {
+        console.log('🏗️ Updating project experience:', vendorData.projectExperience.length, 'projects');
+        
+        // Delete existing projects
+        await prisma.vendorProjectExperience.deleteMany({
+          where: { vendorId: vendor.id }
+        });
+  
+        // Create new projects
+        for (const project of vendorData.projectExperience) {
+          const projectData = {
+            vendorId: vendor.id,
+            projectName: project.projectName,
+            clientName: project.clientName,
+            contractValue: parseFloat(project.contractValue) || 0,
+            startDate: project.startDate ? new Date(project.startDate) : null,
+            endDate: project.endDate ? new Date(project.endDate) : null,
+            scopeDescription: project.scopeDescription,
+            referenceContact: project.referenceContact,
+            completionFile: null
+          };
+  
+          await prisma.vendorProjectExperience.create({
+            data: projectData
+          });
+        }
+      }
+  
+      // 10. Create audit log
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user.id,
+          action: 'UPDATE_VENDOR_QUALIFICATION',
+          entity: 'VENDOR',
+          entityId: vendor.id,
+          data: {
+            updatedFields: Object.keys(updateData),
+            timestamp: new Date().toISOString()
+          }
+        }
+      });
+  
+      // 11. Fetch updated vendor data with proper formatting
+      const finalVendor = await prisma.vendor.findUnique({
+        where: { id: vendor.id },
+        include: {
+          documents: true,
+          projectExperience: true,
+          categories: {
+            include: {
+              category: true
+            }
+          }
+        }
+      });
+  
+      // Flatten categories for response
+      const simplifiedCategories = finalVendor.categories.map(vc => vc.category);
+      const { categories, ...restVendor } = finalVendor;
+  
+      res.json({
+        success: true,
+        message: 'Qualification updated successfully and submitted for review.',
+        data: {
+          ...restVendor,
+          categories: simplifiedCategories,
+        }
+      });
+  
+    } catch (error) {
+      console.error('❌ Error updating vendor qualification:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to update qualification',
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+    }
+  };
 
 // Add this to your backend routes
 /**

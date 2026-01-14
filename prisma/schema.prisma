@@ -57,6 +57,8 @@ model User {
   documentApprovals DocumentApproval[] @relation("DocumentApprovalApprover")
   createdTemplates DocumentTemplate[] @relation("DocumentTemplateCreator")
   approvalActions ApprovalAction[] @relation("ApprovalActionApprover")
+ 
+  informationRequestsCreated      InformationRequest[]
 
   // Add to your User model
   signatureRequestsCreated SignatureRequest[] @relation("SignatureRequestRequester")
@@ -188,6 +190,7 @@ model Vendor {
   priceEntries         PriceEntry[]
   submissions          RFQSubmission[]
   contracts            Contract[]
+  informationRequests  InformationRequest[]
   
   // Audit fields
   createdAt            DateTime     @default(now())
@@ -295,6 +298,7 @@ model RFQ {
   updatedAt            DateTime        @updatedAt
   contracts            Contract[]      @relation("RFQContract")
   createdBy            User            @relation("UserRFQs", fields: [createdById], references: [id])
+  informationRequests  InformationRequest[]
   submissions          RFQSubmission[]
   attachments          Document[]      @relation("rfqAttachments")
 }
@@ -380,6 +384,57 @@ model IPC {
   submittedBy     User       @relation("UserIPCs", fields: [submittedById], references: [id])
 }
 
+// Add this model to your schema
+model InformationRequest {
+  id            Int        @id @default(autoincrement())
+  uuid          String     @unique @default(uuid())
+  title         String
+  description   String?
+  requestType   String     // DOCUMENT_REQUEST, CLARIFICATION, INFO_REQUEST, UPDATE_REQUEST
+  status        RequestStatus @default(PENDING)
+  priority      Priority   @default(MEDIUM)
+  
+  vendorId      Int
+  vendor        Vendor     @relation(fields: [vendorId], references: [id])
+  
+  createdById   Int
+  createdBy     User       @relation(fields: [createdById], references: [id])
+  createdByName String?
+  
+  dueDate       DateTime
+  responseDate  DateTime?
+  responseText  String?
+  responseFiles Document[] @relation("InformationRequestResponseFiles")
+  
+  rejectionReason String?
+  approvedDate   DateTime?
+  
+  // For linking to specific documents or RFQs
+  documentId    Int?
+  document      Document?  @relation("RequestLinkedDocument", fields: [documentId], references: [id])
+  rfqId        Int?
+  rfq          RFQ?       @relation(fields: [rfqId], references: [id])
+  
+  attachments  Document[] @relation("InformationRequestAttachments")
+  
+  // Timeline for tracking status changes
+  timeline     Json?
+  
+  // Notification tracking
+  notificationCount Int @default(0)
+  lastNotified DateTime?
+  
+  // Audit fields
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  
+  @@index([vendorId, status])
+  @@index([dueDate])
+  @@index([createdById])
+  @@map("information_requests")
+}
+
+
 // Enhanced Document Model with Version Control
 model Document {
   id             Int       @id @default(autoincrement())
@@ -417,6 +472,10 @@ model Document {
   ipc            IPC?      @relation("IPCAttachments", fields: [ipcId], references: [id])
   uploadedBy     User?     @relation("uploadedBy", fields: [uploadedById], references: [id])
   rfqAttachments RFQ[]     @relation("rfqAttachments")
+
+  informationRequestResponses InformationRequest[] @relation("InformationRequestResponseFiles")
+  linkedInformationRequests  InformationRequest[] @relation("RequestLinkedDocument")
+  informationRequestAttachments InformationRequest[] @relation("InformationRequestAttachments")
 
   // Add this relation at the end:
   documentApprovals DocumentApproval[] @relation("DocumentApprovals")
@@ -956,6 +1015,16 @@ enum DocumentApprovalStatus {
   APPROVED
   REJECTED
   CHANGES_REQUESTED
+}
+
+// Add this enum to your existing enums section
+enum RequestStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+  OVERDUE
+  CANCELLED
 }
 
 // Enums for approval system

@@ -377,13 +377,4 @@ router.get('/analytics/summary', authenticateToken, authorizeProcurement, async 
         res.status(500).json({ error: 'Failed to fetch vendor analytics.' });
     }
 });
-
-
-
-
-
-
-
-
-
 export default router;
