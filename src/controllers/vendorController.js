@@ -156,8 +156,8 @@ export const getVendorStats = async (req, res) => {
 * GET /api/vendors/qualification/me
 */
 export const getMyQualificationDetails = async (req, res) => {
-  // 1. Ensure the user is a Vendor (roleId=3, based on your seed)
-  if (req.user?.roleId !== 3) {
+  // 1. Ensure the user is a Vendor (roleId=4, based on your seed)
+  if (req.user?.roleId !== 4) {
       return res.status(403).json({ error: 'Access denied. Only Vendor users can access this resource.' });
   }
   
