@@ -1,8 +1,8 @@
 import express from "express";
-// 👇 CHANGE THIS LINE
+
 import { 
     getReports, 
-    getReportById, // Now this function exists!
+    getReportById, 
     createReport, 
     updateReport, 
     deleteReport, 

@@ -12,5 +12,6 @@ router.get('/vendor-benchmarks', authenticateToken, analyticsController.getVendo
 router.get('/kpis', authenticateToken, analyticsController.getKPIs);
 router.get('/dashboard-metrics', authenticateToken, analyticsController.getDashboardMetrics);
 router.get('/health', authenticateToken, analyticsController.getAnalyticsHealth);
+router.get('/vendor-performance', authenticateToken, analyticsController.getVendorPerformance);
 
 export default router;
