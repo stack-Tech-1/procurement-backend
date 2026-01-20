@@ -1,8 +1,6 @@
 // backend/src/controllers/informationRequestController.js
 import prisma from '../config/prismaClient.js';
-import { supabaseAdmin } from '../lib/supabaseAdmin.js';
-
-
+import { generatePresignedUrl, getPublicUrl } from '../lib/awsS3.js';
 
 /**
  * GET /api/information-requests/vendor/requests/stats
@@ -332,18 +330,23 @@ export const getRequestDetails = async (req, res) => {
       });
     }
 
-    // Convert file URLs to public URLs
-    const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'vendor-documents';
-    
+    // Convert file URLs from S3 keys to public URLs
     const processFiles = async (files) => {
       return Promise.all(files.map(async (file) => {
         let publicUrl = file.url;
+        
+        // If it's not already a full URL, it's probably an S3 key
         if (!file.url.startsWith('http')) {
-          const { data } = supabaseAdmin.storage
-            .from(STORAGE_BUCKET)
-            .getPublicUrl(file.url);
-          publicUrl = data?.publicUrl || file.url;
+          try {
+            // Try to generate a presigned URL (valid for 1 hour)
+            publicUrl = await generatePresignedUrl(file.url, 3600) || getPublicUrl(file.url);
+          } catch (error) {
+            console.warn(`Failed to generate URL for file ${file.id}:`, error.message);
+            // Fallback to public URL
+            publicUrl = getPublicUrl(file.url);
+          }
         }
+        
         return { ...file, url: publicUrl };
       }));
     };
@@ -353,12 +356,24 @@ export const getRequestDetails = async (req, res) => {
       processFiles(request.responseFiles || [])
     ]);
 
+    // Process document URL if exists
+    let documentWithUrl = request.document;
+    if (documentWithUrl && !documentWithUrl.url.startsWith('http')) {
+      try {
+        documentWithUrl.url = await generatePresignedUrl(documentWithUrl.url, 3600) || getPublicUrl(documentWithUrl.url);
+      } catch (error) {
+        console.warn(`Failed to generate URL for document ${documentWithUrl.id}:`, error.message);
+        documentWithUrl.url = getPublicUrl(documentWithUrl.url);
+      }
+    }
+
     res.json({
       success: true,
       data: {
         ...request,
         attachments: attachmentsWithUrls,
-        responseFiles: responseFilesWithUrls
+        responseFiles: responseFilesWithUrls,
+        document: documentWithUrl
       }
     });
 
@@ -437,7 +452,9 @@ export const submitResponse = async (req, res) => {
             fileUrl: fileUrl,
             url: fileUrl,
             uploadedById: req.user.id,
-            uploadedAt: new Date()
+            uploadedAt: new Date(),
+            mimeType: this.getMimeTypeFromUrl(fileUrl),
+            tags: ['information-request', 'response']
           }
         });
         return { id: document.id };
@@ -510,7 +527,161 @@ export const submitResponse = async (req, res) => {
   }
 };
 
+/**
+ * Helper function to guess MIME type from URL/file extension
+ */
+function getMimeTypeFromUrl(url) {
+  const extension = url.split('.').pop().toLowerCase();
+  
+  const mimeTypes = {
+    // Images
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    svg: 'image/svg+xml',
+    webp: 'image/webp',
+    
+    // Documents
+    pdf: 'application/pdf',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    
+    // Text
+    txt: 'text/plain',
+    csv: 'text/csv',
+    
+    // Archives
+    zip: 'application/zip',
+    rar: 'application/vnd.rar',
+    
+    // Other
+    json: 'application/json',
+    xml: 'application/xml'
+  };
+  
+  return mimeTypes[extension] || 'application/octet-stream';
+}
 
+/**
+ * POST /api/information-requests/vendor/requests/:id/upload-response-file
+ * Upload a file for an information request response
+ */
+export const uploadResponseFile = async (req, res) => {
+  try {
+    // Check if user is a vendor
+    if (req.user?.roleId !== 4) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Access denied. Vendor access only.' 
+      });
+    }
+
+    const { id } = req.params;
+    
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'No file uploaded.' 
+      });
+    }
+
+    // Find vendor associated with this user
+    const vendor = await prisma.vendor.findUnique({
+      where: { userId: req.user.id },
+      select: { id: true }
+    });
+
+    if (!vendor) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Vendor profile not found.' 
+      });
+    }
+
+    // Find the request
+    const request = await prisma.informationRequest.findFirst({
+      where: {
+        OR: [
+          { id: parseInt(id) || 0 },
+          { uuid: id }
+        ],
+        vendorId: vendor.id,
+        status: { in: ['PENDING', 'OVERDUE'] }
+      }
+    });
+
+    if (!request) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Request not found or not in pending status.' 
+      });
+    }
+
+    // Import AWS S3 upload function
+    const { uploadToS3 } = await import('../lib/awsS3.js');
+
+    // Upload file to AWS S3
+    const s3Key = await uploadToS3(
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype,
+      'information-requests',
+      `vendor-${vendor.id}/request-${request.id}`
+    );
+
+    // Generate public URL
+    const fileUrl = getPublicUrl(s3Key);
+    const presignedUrl = await generatePresignedUrl(s3Key, 3600);
+
+    // Create document record
+    const document = await prisma.document.create({
+      data: {
+        fileName: req.file.originalname,
+        fileUrl: s3Key,
+        url: s3Key, // Store S3 key
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        uploadedById: req.user.id,
+        uploadedAt: new Date(),
+        tags: ['information-request', 'response']
+      }
+    });
+
+    // Connect document to the request
+    await prisma.informationRequest.update({
+      where: { id: request.id },
+      data: {
+        responseFiles: {
+          connect: { id: document.id }
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'File uploaded successfully.',
+      data: {
+        id: document.id,
+        fileName: document.fileName,
+        url: presignedUrl || fileUrl,
+        mimeType: document.mimeType,
+        size: document.size
+      }
+    });
+
+  } catch (error) {
+    console.error('Error uploading response file:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to upload file' 
+    });
+  }
+};
 
 // Note: We'll create the admin/procurement endpoints (createRequest, updateRequestStatus) later
 // as they're not needed for the vendor dashboard frontend

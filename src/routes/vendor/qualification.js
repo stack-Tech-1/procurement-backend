@@ -2,8 +2,7 @@ import express from "express";
 import { PrismaClient } from "@prisma/client";
 import { authenticateToken } from "../../middleware/authMiddleware.js";
 import multer from "multer";
-import { supabaseAdmin } from '../../lib/supabaseAdmin.js';
-// NOTE: Assuming SUPABASE_STORAGE_BUCKET is available via process.env
+import { uploadToS3, generatePresignedUrl, getPublicUrl } from '../../lib/awsS3.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -11,48 +10,32 @@ const prisma = new PrismaClient();
 // Configure Multer for memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Retrieve the bucket name from environment variables
-const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'vendor-documents'; 
-// Fallback is 'vendor-documents', ensure you create this bucket or set the env var.
-
-
-// --- Utility Function to Upload a File to Supabase Storage ---
-const uploadFileToSupabase = async (file, folder, vendorId) => {
-  // Use a unique path: folder/vendor-[ID]/timestamp-filename
-  const fileKey = `${folder}/vendor-${vendorId}/${Date.now()}-${file.originalname.replace(/\s/g, '_')}`;
-  
-  // Use the imported supabaseAdmin client
-  const { data, error } = await supabaseAdmin.storage
-    .from(STORAGE_BUCKET)
-    .upload(fileKey, file.buffer, {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: file.mimetype,
-    });
-
-  if (error) {
-    console.error("Supabase Upload Error:", error);
-    // Attempt to log more detail if possible
-    throw new Error(`Failed to upload file to Supabase Storage: ${error.message}`);
+// --- Utility Function to Upload a File to AWS S3 ---
+const uploadFileToS3 = async (file, folder, vendorId) => {
+  try {
+    // Upload to S3
+    const key = await uploadToS3(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      folder,
+      vendorId
+    );
+    
+    // Return S3 key for storage in database
+    return key;
+  } catch (error) {
+    console.error("S3 Upload Error:", error);
+    throw new Error(`Failed to upload file to S3: ${error.message}`);
   }
-  
-  // Return the full file path/key for storage in the database
-  return data.path; 
 };
-
 
 // --- Helper to ensure data is in correct format for Prisma ---
 const getExpiryDate = (dateString) => {
-    // Check for falsy values (null, undefined, empty string)
-    if (!dateString) return null;
-    
-    // Attempt to convert the date string into a Date object
-    const date = new Date(dateString); 
-    
-    // If the conversion results in an Invalid Date, return null instead of the invalid date
-    if (isNaN(date)) return null; 
-    
-    return date;
+  if (!dateString) return null;
+  const date = new Date(dateString); 
+  if (isNaN(date)) return null; 
+  return date;
 };
 
 /**
@@ -62,10 +45,11 @@ const getExpiryDate = (dateString) => {
 router.post(
   "/submit",
   authenticateToken,
-  // 1. Multer Middleware
-  upload.any(), 
+  upload.any(), // Handle all file fields
   async (req, res) => {
     try {
+      console.log("📁 Files received:", req.files?.length || 0);
+      
       const vendorDataJson = req.body.vendorData;
       if (!vendorDataJson) {
         return res.status(400).json({ error: "Missing vendorData JSON payload." });
@@ -73,19 +57,19 @@ router.post(
 
       const data = JSON.parse(vendorDataJson);
       const { 
-        documentData: docMetadata, 
-        projectExperience: projectData, 
+        documentData: docMetadata = [], 
+        projectExperience: projectData = [], 
         ...qualificationDetails 
       } = data;
       
-      // FIX 1: Convert productsAndServices STRING TO ARRAY (from previous fix)
+      // Convert productsAndServices string to array
       if (qualificationDetails.productsAndServices && typeof qualificationDetails.productsAndServices === 'string') {
-          qualificationDetails.productsAndServices = qualificationDetails.productsAndServices
-              .split(',')
-              .map(s => s.trim())
-              .filter(s => s.length > 0);
+        qualificationDetails.productsAndServices = qualificationDetails.productsAndServices
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s.length > 0);
       }
-      
+
       const userId = req.user?.id;
       const vendor = await prisma.vendor.findUnique({ where: { userId } });
 
@@ -93,146 +77,256 @@ router.post(
         return res.status(400).json({ error: "Vendor profile not found." });
       }
 
-      const uploadedFiles = req.files;
+      const uploadedFiles = req.files || [];
       const uploadedDocuments = [];
       const uploadedProjects = [];
 
+      console.log(`🔄 Processing files for vendor ID: ${vendor.id}`);
+
       // 1. Handle Company Profile PDF
-      let companyProfilePath = null;
       const companyProfileFile = uploadedFiles.find(f => f.fieldname === 'company_profile_pdf');
-      
       if (companyProfileFile) {
-        companyProfilePath = await uploadFileToSupabase(companyProfileFile, 'profiles', vendor.id); 
+        console.log("📄 Uploading company profile...");
+        const s3Key = await uploadFileToS3(companyProfileFile, 'profiles', vendor.id);
         
-        // Add the Company Profile as a Document entry
         uploadedDocuments.push({
           vendorId: vendor.id,
-          storagePath: companyProfilePath,
+          storagePath: s3Key, // Store S3 key
           docType: 'COMPANY_PROFILE',
           documentNumber: null,
-          expiryDate: null, // 👈 Ensures null is used for nullable date field
+          expiryDate: null,
           fileName: companyProfileFile.originalname,
         });
       }
 
-
       // 2. Handle Other Documents
-      for (const meta of docMetadata) {
-        const fileKey = `file_${meta.docType}`;
-        const file = uploadedFiles.find(f => f.fieldname === fileKey);
+      for (const meta of docMetadata) {
+        const fileKey = `file_${meta.docType}`;
+        const file = uploadedFiles.find(f => f.fieldname === fileKey);
 
-        if (file) {
-          const storagePath = await uploadFileToSupabase(file, 'documents', vendor.id); 
-          
-          // FIX 2: Explicitly map fields and use getExpiryDate/null to clean data for Prisma
-          uploadedDocuments.push({
-            vendorId: vendor.id,
-            storagePath, 
-            docType: meta.docType,
-            fileName: file.originalname,
-            documentNumber: meta.documentNumber || null,
-            expiryDate: getExpiryDate(meta.expiryDate), 
-            // 🔑 NEW FIELD: Include isoType if it exists
-            isoType: meta.isoType || null, 
-          });
-        }
-      }
+        if (file) {
+          console.log(`📄 Uploading ${meta.docType}...`);
+          const s3Key = await uploadFileToS3(file, 'documents', vendor.id);
+          
+          uploadedDocuments.push({
+            vendorId: vendor.id,
+            storagePath: s3Key,
+            docType: meta.docType,
+            fileName: file.originalname,
+            documentNumber: meta.documentNumber || null,
+            expiryDate: getExpiryDate(meta.expiryDate),
+            isoType: meta.isoType || null,
+          });
+        }
+      }
 
-      // 3. Handle Project Experience
+      // 3. Handle Project Experience files
       for (let i = 0; i < projectData.length; i++) {
         const project = projectData[i];
         const fileKey = `project_file_${i}`;
         const file = uploadedFiles.find(f => f.fieldname === fileKey);
         
-        let certificateStoragePath = null;
+        let certificateS3Key = null;
         if (file) {
-          const folderName = 'project-certificates';
-          certificateStoragePath = await uploadFileToSupabase(file, folderName, vendor.id);
+          console.log(`📄 Uploading project certificate ${i}...`);
+          certificateS3Key = await uploadFileToS3(file, 'project-certificates', vendor.id);
         }
         
-        // FIX 3: Convert date strings to Date objects for Project Experience dates
         uploadedProjects.push({
           ...project,
           vendorId: vendor.id,
-          contractValue: parseFloat(project.contractValue),
-          startDate: getExpiryDate(project.startDate), // Reuse helper for start date
-          endDate: getExpiryDate(project.endDate),     // Reuse helper for end date
-          completionCertificateStoragePath: certificateStoragePath, 
+          contractValue: parseFloat(project.contractValue) || 0,
+          startDate: getExpiryDate(project.startDate),
+          endDate: getExpiryDate(project.endDate),
+          completionCertificateStoragePath: certificateS3Key,
         });
       }
 
       // 4. Prisma Transaction
-      const result = await prisma.$transaction(async (tx) => {
-        
+const result = await prisma.$transaction(async (tx) => {
+  
+  // Prepare logo URL if it exists
+  let logoToUpdate = {};
+  
+  // Handle logo from different sources:
+  if (qualificationDetails.logoUrl) {
+    // Logo URL from form data
+    logoToUpdate.logo = qualificationDetails.logoUrl;
+  } else if (logoPreview) {
+    // Logo preview URL (if you're using blob URL)
+    logoToUpdate.logo = logoPreview;
+  } else {
+    // Check if logo file was uploaded separately
+    const logoFile = uploadedFiles.find(f => f.fieldname === 'companyLogo');
+    if (logoFile) {
+      try {
+        console.log('📷 Processing logo file upload...');
+        const logoKey = await uploadFileToS3(logoFile, 'logos', vendor.id);
+        const logoUrl = getPublicUrl(logoKey); // Or generatePresignedUrl for private
+        logoToUpdate.logo = logoUrl;
+        console.log('✅ Logo uploaded to S3:', logoUrl);
+      } catch (logoError) {
+        console.error('❌ Error uploading logo:', logoError);
+        // Continue without logo, don't fail the whole submission
+      }
+    }
+  }
 
-        // 4.1 UPDATE THE VENDOR RECORD
-        const updatedVendor = await tx.vendor.update({
-          where: { id: vendor.id }, 
-          data: { 
-            // Ensure all qualificationDetails fields are spread
-            ...qualificationDetails, 
-            
-            // 🔑 NEW & UPDATED FIELD MAPPING:
-            mainCategory: Array.isArray(qualificationDetails.mainCategory) 
-              ? qualificationDetails.mainCategory 
-              : null, // Ensure Prisma receives an array or null
-            // If qualificationDetails is already validated by Zod, 
-            // these should be correct, but be explicit for clarity:
-            subCategory: qualificationDetails.subCategory || null,
-            csiSpecialization: qualificationDetails.csiSpecialization || null,
-            chamberClass: qualificationDetails.chamberClass || null,
-            chamberRegion: qualificationDetails.chamberRegion || null,
-            addressRegion: qualificationDetails.addressRegion || null, // The new address field
-            technicalContactName: qualificationDetails.technicalContactName || null,
-            technicalContactEmail: qualificationDetails.technicalContactEmail || null,
-            financialContactName: qualificationDetails.financialContactName || null,
-            financialContactEmail: qualificationDetails.financialContactEmail || null,
-
-            status: 'UNDER_REVIEW', 
-            updatedAt: new Date(),
-          },
-        });
+  // 4.1 UPDATE THE VENDOR RECORD
+  const updatedVendor = await tx.vendor.update({
+    where: { id: vendor.id }, 
+    data: { 
+      // Basic company info
+      companyLegalName: qualificationDetails.companyLegalName || null,
+      vendorType: qualificationDetails.vendorType || null,
+      businessType: qualificationDetails.businessType || null,
+      licenseNumber: qualificationDetails.licenseNumber || null,
+      
+      // Business details
+      yearsInBusiness: parseInt(qualificationDetails.yearsInBusiness) || 0,
+      gosiEmployeeCount: parseInt(qualificationDetails.gosiEmployeeCount) || 0,
+      chamberClass: qualificationDetails.chamberClass || null,
+      chamberRegion: qualificationDetails.chamberRegion || null,
+      
+      // Categories and specialization
+      mainCategory: Array.isArray(qualificationDetails.mainCategory) 
+        ? qualificationDetails.mainCategory 
+        : (qualificationDetails.mainCategory ? [qualificationDetails.mainCategory] : []),
+      subCategory: qualificationDetails.subCategory || null,
+      productsAndServices: Array.isArray(qualificationDetails.productsAndServices) 
+        ? qualificationDetails.productsAndServices 
+        : (qualificationDetails.productsAndServices ? [qualificationDetails.productsAndServices] : []),
+      csiSpecialization: qualificationDetails.csiSpecialization || null,
+      
+      // Contact information
+      contactPerson: qualificationDetails.contactPerson || null,
+      contactPhone: qualificationDetails.contactPhone || null,
+      contactEmail: qualificationDetails.contactEmail || null,
+      website: qualificationDetails.website || null,
+      addressStreet: qualificationDetails.addressStreet || null,
+      addressCity: qualificationDetails.addressCity || null,
+      addressRegion: qualificationDetails.addressRegion || null,
+      addressCountry: qualificationDetails.addressCountry || null,
+      
+      // Primary contact fields
+      primaryContactName: qualificationDetails.primaryContactName || null,
+      primaryContactTitle: qualificationDetails.primaryContactTitle || null,
+      technicalContactName: qualificationDetails.technicalContactName || null,
+      technicalContactEmail: qualificationDetails.technicalContactEmail || null,
+      financialContactName: qualificationDetails.financialContactName || null,
+      financialContactEmail: qualificationDetails.financialContactEmail || null,
+      
+      // Logo update (if any)
+      ...logoToUpdate,
+      
+      // Status updates
+      status: 'UNDER_REVIEW', 
+      reviewStatus: 'Needs Review',
+      lastReviewedAt: new Date(),
+      updatedAt: new Date(),            
+            
+            // Remove fields that don't exist in your schema:
+            // ❌ Don't include: majorBrands, authorizationLevel, authLettersAvailable,
+            //    primaryProductCategories, countryOfOrigin, localManufacturing,
+            //    leadConsultantCV, keyTeamMembers, companyResume, similarProjectsCount,
+            //    assignmentDetails, clientReferences
+          },
+        });
 
         // 4.2 Handle Vendor Documents
         await tx.vendorDocument.deleteMany({ where: { vendorId: vendor.id } });
-        await tx.vendorDocument.createMany({ 
-                    data: uploadedDocuments.map(doc => ({
-                      url: doc.storagePath, 
-                      documentNumber: doc.documentNumber, 
-                      expiryDate: doc.expiryDate, 
-                      docType: doc.docType, 
-                      vendorId: doc.vendorId,
-                      fileName: doc.fileName,
-                      isoType: doc.isoType, // 🔑 NEW FIELD: Pass the isoType here
-                    })) 
-                  })
+        if (uploadedDocuments.length > 0) {
+          await tx.vendorDocument.createMany({
+            data: uploadedDocuments.map(doc => ({
+              url: doc.storagePath, // Store S3 key
+              documentNumber: doc.documentNumber,
+              expiryDate: doc.expiryDate,
+              docType: doc.docType,
+              vendorId: doc.vendorId,
+              fileName: doc.fileName,
+              isoType: doc.isoType,
+            }))
+          });
+        }
+
         // 4.3 Handle Project Experience
         await tx.vendorProjectExperience.deleteMany({ where: { vendorId: vendor.id } });
-        await tx.vendorProjectExperience.createMany({ 
-          data: uploadedProjects.map(p => ({
-            ...p, 
-            // Fix: Map the corrected dates and file path to schema fields
-            completionFile: p.completionCertificateStoragePath,
-            // Remove transient properties 
-            completionCertificateStoragePath: undefined, 
-            startDate: p.startDate,
-            endDate: p.endDate
-          })) 
-        });
+        if (uploadedProjects.length > 0) {
+          await tx.vendorProjectExperience.createMany({
+            data: uploadedProjects.map(p => ({
+              ...p,
+              completionFile: p.completionCertificateStoragePath,
+              completionCertificateStoragePath: undefined,
+              startDate: p.startDate,
+              endDate: p.endDate
+            }))
+          });
+        }
 
-        return updatedVendor; 
+        return updatedVendor;
       });
 
+      console.log("✅ Vendor qualification submitted successfully");
+
       res.status(200).json({
+        success: true,
         message: "Vendor qualification submitted successfully and is now UNDER REVIEW.",
-        qualification: result,
+        data: {
+          id: result.id,
+          status: result.status
+        },
       });
 
     } catch (error) {
       console.error("❌ Fatal Submission Error:", error);
-      res.status(500).json({ error: "Failed to process vendor qualification. Please try again." });
+      res.status(500).json({ 
+        success: false,
+        error: "Failed to process vendor qualification. Please try again.",
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   }
 );
+
+/**
+ * GET /api/vendor/documents/:key/url
+ * Generate a presigned URL for a document
+ */
+router.get("/documents/:key/url", authenticateToken, async (req, res) => {
+  try {
+    const { key } = req.params;
+    const userId = req.user?.id;
+    
+    // Verify the user has access to this document
+    const vendor = await prisma.vendor.findUnique({ where: { userId } });
+    if (!vendor) {
+      return res.status(404).json({ error: "Vendor not found" });
+    }
+
+    // Verify document belongs to vendor
+    const document = await prisma.vendorDocument.findFirst({
+      where: {
+        vendorId: vendor.id,
+        url: key,
+      },
+    });
+
+    if (!document) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // Generate presigned URL (valid for 1 hour)
+    const signedUrl = await generatePresignedUrl(key, 3600);
+    
+    if (!signedUrl) {
+      return res.status(500).json({ error: "Failed to generate download URL" });
+    }
+
+    res.json({ url: signedUrl });
+  } catch (error) {
+    console.error("Error generating document URL:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 export default router;

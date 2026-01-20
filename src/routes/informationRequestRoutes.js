@@ -1,27 +1,23 @@
-// backend/src/routes/informationRequestRoutes.js
-import express from 'express';
-import { authenticateToken } from '../middleware/authMiddleware.js';
+// backend/src/routes/informationRequestRoutes.js (or wherever your routes are)
+import express from "express";
+import multer from "multer";
 import {
+  getRequestStats,
   getVendorRequests,
   getRequestDetails,
   submitResponse,
-  getRequestStats,
-  //createRequest,
-  //updateRequestStatus
-} from '../controllers/informationRequestController.js';
+  uploadResponseFile
+} from "../controllers/informationRequestController.js";
+import { authenticateToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
-router.get('/vendor/requests/stats', authenticateToken, getRequestStats);
-
-// Vendor routes (for vendors to view and respond to requests)
-router.get('/vendor/requests', authenticateToken, getVendorRequests);
-router.get('/vendor/requests/:id', authenticateToken, getRequestDetails);
-router.post('/vendor/requests/:id/respond', authenticateToken, submitResponse);
-
-// Admin/Procurement routes (for creating and managing requests)
-router.get('/vendor/requests/:vendorId/all', authenticateToken, getVendorRequests); // For admin view
-//router.post('/vendor/requests', authenticateToken, createRequest);
-//router.put('/vendor/requests/:id/status', authenticateToken, updateRequestStatus);
+// Vendor routes
+router.get("/vendor/requests/stats", authenticateToken, getRequestStats);
+router.get("/vendor/requests", authenticateToken, getVendorRequests);
+router.get("/vendor/requests/:id", authenticateToken, getRequestDetails);
+router.post("/vendor/requests/:id/respond", authenticateToken, submitResponse);
+router.post("/vendor/requests/:id/upload-response-file", authenticateToken, upload.single("file"), uploadResponseFile);
 
 export default router;

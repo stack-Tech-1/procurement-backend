@@ -2,7 +2,7 @@
 
 import express from 'express';
 // Import the new utility function
-import { getSignedUrl } from '../../lib/supabaseAdmin.js'; 
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"; 
 import { authenticateToken } from '../../middleware/authMiddleware.js'; 
 
 const router = express.Router();
