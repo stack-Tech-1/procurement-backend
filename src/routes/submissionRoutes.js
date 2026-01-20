@@ -1,5 +1,6 @@
 // backend/src/routes/submissionRoutes.js
 import express from "express";
+import multer from "multer";
 import {
   createSubmission,
   getSubmissions,
@@ -11,8 +12,12 @@ import {
 import { authenticateToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
-router.post("/", authenticateToken, createSubmission);
+// Create submission with file upload
+router.post("/", authenticateToken, upload.single("submissionFile"), createSubmission);
+
+// Other routes remain the same
 router.get("/", authenticateToken, getSubmissions);
 router.get("/:id", authenticateToken, getSubmissionById);
 router.put("/:id", authenticateToken, updateSubmission);

@@ -36,6 +36,7 @@ import advancedApprovalRoutes from './routes/advancedApprovalRoutes.js';
 import analyticsRoutes from './routes/analytics.js';
 import budgetRoutes from './routes/budgetRoutes.js';
 import informationRequestRoutes from './routes/informationRequestRoutes.js';
+import vendorSubmissionsRouter from './routes/vendor/submissions.js';
 
 dotenv.config();
 const app = express();
@@ -50,35 +51,36 @@ app.use(cors({
 
 app.use(express.json());
 
-// Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/vendors", vendorRoutes);
-app.use("/api/materials", materialRoutes);
-app.use("/api/price-entries", priceEntryRoutes);
-app.use("/api/rfqs", rfqRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/contracts", contractRoutes);
-app.use("/api/ipcs", ipcRoutes);
-app.use("/api/vendor/qualification", vendorQualificationRoute);
-app.use('/api/admin/files', adminFilesRouter);
-app.use('/api/admin/submissions', qualificationRoutes);
-app.use("/api/vendor", vendorManagementRoute);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/audit', auditRoutes);
-app.use("/api/submissions", submissionRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/health', healthRoutes);
-app.use('/api/documents', documentRoutes);
-app.use('/api/approvals', approvalWorkflowRoutes);
-app.use('/api/signatures', signatureRoutes);
-app.use('/api/advanced-approvals', advancedApprovalRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/budget', budgetRoutes);
-app.use('/api/information-requests', informationRequestRoutes);
+ // Routes
+ app.use("/api/auth", authRoutes);
+ app.use("/api/admin", adminRoutes);
+ app.use("/api/vendors", vendorRoutes);
+ app.use("/api/materials", materialRoutes);
+ app.use("/api/price-entries", priceEntryRoutes);
+ app.use("/api/rfqs", rfqRoutes);
+ app.use("/api/users", userRoutes);
+ app.use("/api/contracts", contractRoutes);
+ app.use("/api/ipcs", ipcRoutes);
+ app.use("/api/vendor/qualification", vendorQualificationRoute);
+ app.use('/api/admin/files', adminFilesRouter);
+ app.use('/api/admin/submissions', qualificationRoutes);
+ app.use("/api/vendor", vendorManagementRoute);
+ app.use('/api/categories', categoryRoutes);
+ app.use('/api/audit', auditRoutes);
+ app.use("/api/submissions", submissionRoutes);
+ app.use('/api/reports', reportRoutes);
+ app.use('/api/dashboard', dashboardRoutes);
+ app.use('/api/notifications', notificationRoutes);
+ app.use('/api/tasks', taskRoutes);
+ app.use('/api/health', healthRoutes);
+ app.use('/api/documents', documentRoutes);
+ app.use('/api/approvals', approvalWorkflowRoutes);
+ app.use('/api/signatures', signatureRoutes);
+ app.use('/api/advanced-approvals', advancedApprovalRoutes);
+ app.use('/api/analytics', analyticsRoutes);
+ app.use('/api/budget', budgetRoutes);
+ app.use('/api/information-requests', informationRequestRoutes);
+ app.use('/api/vendor/submissions', vendorSubmissionsRouter);
 
 
 

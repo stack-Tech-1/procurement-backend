@@ -1,52 +1,117 @@
 // backend/src/controllers/submissionController.js
 import prisma from "../config/prismaClient.js";
+import { uploadToS3, generatePresignedUrl } from "../lib/awsS3.js";
 
 /**
- * Create Vendor Submission for RFO
+ * Create Vendor Submission for RFQ
  */
 export const createSubmission = async (req, res) => {
   try {
-    const {
-      rfqId,
-      vendorId,
-      totalValue,
-      currency,
-      docUrl,
-      items,
-      status = "SUBMITTED"
+    const userId = req.user?.id;
+    const { 
+      rfqId, 
+      totalValue, 
+      totalAmount,
+      currency, 
+      items, 
+      status = "SUBMITTED" 
     } = req.body;
 
-    // Check if RFO exists
+    // 1. Get vendor by user ID
+    const vendor = await prisma.vendor.findUnique({
+      where: { userId: parseInt(userId) }
+    });
+    
+    if (!vendor) {
+      return res.status(404).json({ error: "Vendor profile not found" });
+    }
+
+    // 2. Check if RFQ exists and is open
     const rfq = await prisma.rFQ.findUnique({
       where: { id: parseInt(rfqId) }
     });
 
     if (!rfq) {
-      return res.status(404).json({ error: "RFO not found" });
+      return res.status(404).json({ error: "RFQ not found" });
     }
 
-    // Check if vendor exists
-    const vendor = await prisma.vendor.findUnique({
-      where: { id: parseInt(vendorId) }
+    if (rfq.status !== "OPEN" && rfq.status !== "ISSUED") {
+      return res.status(400).json({ 
+        error: "RFQ is not accepting submissions",
+        currentStatus: rfq.status 
+      });
+    }
+
+    // 3. Check submission deadline
+    if (rfq.dueDate && new Date(rfq.dueDate) < new Date()) {
+      return res.status(400).json({ 
+        error: "Submission deadline has passed" 
+      });
+    }
+
+    // 4. Check for duplicate submission
+    const existingSubmission = await prisma.rFQSubmission.findFirst({
+      where: {
+        rfqId: parseInt(rfqId),
+        vendorId: vendor.id
+      }
     });
 
-    if (!vendor) {
-      return res.status(404).json({ error: "Vendor not found" });
+    if (existingSubmission) {
+      return res.status(400).json({ 
+        error: "You have already submitted a proposal for this RFQ",
+        existingSubmissionId: existingSubmission.id 
+      });
     }
 
+    // 5. Handle file upload (if using FormData/multer)
+    let docUrl = null;
+    let docKey = null;
+    if (req.file) {
+      const file = req.file;
+      docKey = await uploadToS3(
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+        "submissions",
+        `rfq-${rfqId}`
+      );
+      docUrl = await generatePresignedUrl(docKey, 3600); // 1 hour access
+    }
+
+    // 6. Create submission
     const submission = await prisma.rFQSubmission.create({
       data: {
         totalValue: totalValue ? parseFloat(totalValue) : null,
+        totalAmount: totalAmount ? parseFloat(totalAmount) : null,
         currency: currency || "SAR",
-        docUrl,
+        docUrl: docKey || docUrl, // Store S3 key or URL
         items: items || {},
         status: status,
+        submittedAt: new Date(),
         rfq: { connect: { id: parseInt(rfqId) } },
-        vendor: { connect: { id: parseInt(vendorId) } }
+        vendor: { connect: { id: vendor.id } }
       },
       include: {
-        rfq: true,
-        vendor: true,
+        rfq: {
+          select: {
+            id: true,
+            title: true,
+            rfqNumber: true,
+            projectName: true,
+            status: true,
+            dueDate: true
+          }
+        },
+        vendor: {
+          select: {
+            id: true,
+            companyLegalName: true,
+            vendorId: true,
+            contactEmail: true,
+            contactPhone: true
+          }
+        },
         evaluations: {
           include: {
             evaluator: { select: { id: true, name: true, email: true } }
@@ -55,10 +120,40 @@ export const createSubmission = async (req, res) => {
       }
     });
 
-    res.status(201).json(submission);
+    // 7. Generate signed URL for the document if stored as S3 key
+    if (submission.docUrl && !submission.docUrl.startsWith('http')) {
+      submission.docUrl = await generatePresignedUrl(submission.docUrl, 3600);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Submission created successfully",
+      data: submission
+    });
+
   } catch (error) {
     console.error("Error creating submission:", error);
-    res.status(500).json({ error: "Failed to create submission" });
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2002') {
+      return res.status(400).json({ 
+        success: false,
+        error: "Duplicate submission detected" 
+      });
+    }
+    
+    if (error.code === 'P2025') {
+      return res.status(404).json({ 
+        success: false,
+        error: "Related record not found" 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to create submission",
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
