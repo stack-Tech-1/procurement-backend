@@ -7,100 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ────────────────────────────────────────────────
+// Enums (combined & extended)
+// ────────────────────────────────────────────────
 
-model User {
-  id              Int      @id @default(autoincrement())
-  uuid            String   @unique @default(uuid())
-  name            String?
-  email           String   @unique
-  password        String
-  roleId          Int
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  accessCode      String?
-  status          String   @default("ACTIVE")
-  
-  employeeId      String?  @unique
-  jobTitle        String?
-  department      String?
-  lastLoginDate   DateTime? 
-
-  // FIXED: Add relation names to distinguish between approvals
-  approvals       Approval[]  @relation("UserApprovals") // Approvals where user is the approver
-  requestedApprovals Approval[] @relation("UserRequestedApprovals") // Approvals requested by user
-  
-  auditLogs       AuditLog[]      @relation("UserAuditLogs")
-  documents       Document[]      @relation("uploadedBy")
-  evaluations     Evaluation[]    @relation("UserEvaluations")
-  ipcs            IPC[]           @relation("UserIPCs")
-  notifications   Notification[]  @relation("UserNotifications")
-  rfqs            RFQ[]           @relation("UserRFQs")
-  role            Role     @relation(fields: [roleId], references: [id])
-
-  vendor          Vendor?
-
-  vendorsAssigned Vendor[] @relation("AssignedReviewer")
-  vendorsReviewed Vendor[] @relation("LastReviewedBy")
-
-  // ---Reporting System Relations---
-  reportsCreated  Report[]                @relation("UserCreatedReports")
-  reportExecutions ReportExecution[]      @relation("UserReportExecutions")
-  reportFavorites UserReportFavorite[]    @relation("UserReportFavorites")
-
-  // 👇 ADDED: MISSING RELATIONS FOR THE TASK MODEL
-  tasksAssigned   Task[] @relation("AssignedTasks") // Inverse for 'assignedUser'
-  tasksCreated    Task[] @relation("CreatedTasks")  // Inverse for 'assignedByUser'
-
-  // 👇 ADD: New relations for document management
-  signedDocuments Document[] @relation("SignedDocuments")
-  documentApprovals DocumentApproval[] @relation("DocumentApprovalApprover")
-  createdTemplates DocumentTemplate[] @relation("DocumentTemplateCreator")
-  approvalActions ApprovalAction[] @relation("ApprovalActionApprover")
- 
-  informationRequestsCreated      InformationRequest[]
-
-  // Add to your User model
-  signatureRequestsCreated SignatureRequest[] @relation("SignatureRequestRequester")
-  signatureRequestsSigned  SignatureRequest[] @relation("SignatureRequestSigner")
-
-  // 👇 ADD THIS: Inverse relation for ApprovalWorkflow
-  createdApprovalWorkflows ApprovalWorkflow[] @relation("ApprovalWorkflowCreator")
-  // 👇 ADD THIS: Inverse relation for ApprovalStep
-  approvalSteps ApprovalStep[] @relation("ApprovalStepApprover")
-
-  // REMOVED: These duplicate relations (they're already defined above with proper relation names)
-  // createdWorkflows ApprovalWorkflow[]  // DUPLICATE - use createdApprovalWorkflows
-  // requestedApprovals Approval[]        // DUPLICATE - already defined above
-  // approvedSteps    ApprovalStep[]      // DUPLICATE - use approvalSteps
-}
-
-
-model Role {
-  id    Int     @id @default(autoincrement())
-  desc  String?
-  name  String  @unique
-  users User[]
-
-  // Add these relations:
-  documentApprovalSteps DocumentApprovalStep[]
-  approvalWorkflowSteps ApprovalWorkflowStep[] // 👈 ADD THIS
-}
-
-// --- Vendor Status Enum (Already good, but adding a status for 'Needs Renewal') ---
 enum VendorStatus {
   NEW
   UNDER_REVIEW
   APPROVED
   REJECTED
   BLACKLISTED
-  NEEDS_RENEWAL // Added for auto-validation rule: auto "Rejected" or "Needs Renewal"
+  NEEDS_RENEWAL
 }
 
-// --- New Document Type Enum (Required for robust Document Checklist) ---
 enum VendorDocumentType {
-  COMMERCIAL_REGISTRATION // CR
+  COMMERCIAL_REGISTRATION
   ZAKAT_CERTIFICATE
+  VAT_CERTIFICATE
+  GOSI_CERTIFICATE
   ISO_CERTIFICATE
   SASO_SABER_CERTIFICATE
   HSE_PLAN
@@ -109,150 +33,355 @@ enum VendorDocumentType {
   ORGANIZATION_CHART
   TECHNICAL_FILE
   FINANCIAL_FILE
-  VAT_CERTIFICATE
-  GOSI_CERTIFICATE
   BANK_LETTER
   INSURANCE_CERTIFICATE
   INDUSTRY_LICENSE
   VENDOR_CODE_OF_CONDUCT
   COMPANY_PROFILE
+  // You can add COMPANY_LOGO here later if you prefer logo as document
 }
 
-// --- The Main Vendor Model (Consolidated and Enhanced) ---
+enum SignatureRequestStatus {
+  PENDING
+  SIGNED
+  EXPIRED
+  CANCELLED
+}
+
+enum TaskType {
+  VENDOR_REVIEW
+  RFQ_EVALUATION
+  CONTRACT_REVIEW
+  IPC_PROCESSING
+  DOCUMENT_VERIFICATION
+  PROJECT_FOLLOWUP
+  GENERAL
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum ReportCategory {
+  FINANCIAL
+  VENDOR
+  CONTRACT
+  PROJECT
+  CUSTOM
+}
+
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum FilterType {
+  DATE
+  SELECT
+  MULTISELECT
+  NUMBER
+  TEXT
+  BOOLEAN
+}
+
+enum DataType {
+  STRING
+  NUMBER
+  DATE
+  CURRENCY
+  PERCENTAGE
+  BOOLEAN
+}
+
+enum AggregationType {
+  SUM
+  AVERAGE
+  COUNT
+  MIN
+  MAX
+  NONE
+}
+
+enum ReportStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+}
+
+enum RoleName {
+  ADMIN
+  PROCUREMENT_MANAGER
+  PROCUREMENT_ENGINEER
+  COST_MANAGER
+  PROJECT_MANAGER
+  TECHNICAL_OFFICE
+  DATA_CONTROLLER
+  VENDOR_USER
+}
+
+enum RFQStatus {
+  DRAFT
+  ISSUED
+  OPEN
+  CLOSED
+  AWARDED
+  CANCELED
+}
+
+enum IPCStatus {
+  SUBMITTED
+  PROCUREMENT_REVIEW
+  TECHNICAL_APPROVED
+  FINANCE_REVIEW
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum SignatureStatus {
+  NOT_REQUIRED
+  PENDING_SIGNATURE
+  SIGNED
+  REJECTED
+  EXPIRED
+}
+
+enum DocumentApprovalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum RequestStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+  OVERDUE
+  CANCELLED
+}
+
+enum ApprovalInstanceStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  CANCELLED
+  ESCALATED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  RETURNED
+  ESCALATED
+}
+
+// ────────────────────────────────────────────────
+// Models
+// ────────────────────────────────────────────────
+
+model User {
+  id                            Int                           @id @default(autoincrement())
+  uuid                          String                        @unique @default(uuid())
+  name                          String?
+  email                         String                        @unique
+  password                      String
+  roleId                        Int
+  isActive                      Boolean                       @default(true)
+  createdAt                     DateTime                      @default(now())
+  updatedAt                     DateTime                      @updatedAt
+  accessCode                    String?
+  status                        String                        @default("ACTIVE")
+  department                    String?
+  employeeId                    String?                       @unique
+  jobTitle                      String?
+  lastLoginDate                 DateTime?
+
+  approvals                     Approval[]                    @relation("UserApprovals")
+  requestedApprovals            Approval[]                    @relation("UserRequestedApprovals")
+  approvalSteps                 ApprovalStep[]                @relation("ApprovalStepApprover")
+  createdApprovalWorkflows      ApprovalWorkflow[]            @relation("ApprovalWorkflowCreator")
+  auditLogs                     AuditLog[]                    @relation("UserAuditLogs")
+  documentApprovals             DocumentApproval[]            @relation("DocumentApprovalApprover")
+  createdTemplates              DocumentTemplate[]            @relation("DocumentTemplateCreator")
+  evaluations                   Evaluation[]                  @relation("UserEvaluations")
+  ipcs                          IPC[]                         @relation("UserIPCs")
+  rfqs                          RFQ[]                         @relation("UserRFQs")
+  reportsCreated                Report[]                      @relation("UserCreatedReports")
+  reportExecutions              ReportExecution[]             @relation("UserReportExecutions")
+  tasksCreated                  Task[]                        @relation("CreatedTasks")
+  tasksAssigned                 Task[]                        @relation("AssignedTasks")
+  role                          Role                          @relation(fields: [roleId], references: [id])
+  reportFavorites               UserReportFavorite[]          @relation("UserReportFavorites")
+  vendorsAssigned               Vendor[]                      @relation("AssignedReviewer")
+  vendorsReviewed               Vendor[]                      @relation("LastReviewedBy")
+  vendor                        Vendor?
+  approvalActions               ApprovalAction[]              @relation("ApprovalActionApprover")
+  signedDocuments               Document[]                    @relation("SignedDocuments")
+  documents                     Document[]                    @relation("uploadedBy")
+  informationRequestsCreated    InformationRequest[]
+  notifications                 Notification[]                @relation("UserNotifications")
+  signatureRequestsCreated      SignatureRequest[]            @relation("SignatureRequestRequester")
+  signatureRequestsSigned       SignatureRequest[]            @relation("SignatureRequestSigner")
+}
+
+model Role {
+  id                        Int                         @id @default(autoincrement())
+  desc                      String?
+  name                      String                      @unique
+  users                     User[]
+  documentApprovalSteps     DocumentApprovalStep[]
+  approvalWorkflowSteps     ApprovalWorkflowStep[]
+}
+
 model Vendor {
-  id                   Int           @id @default(autoincrement())
-  vendorId             String?       @unique // A. Vendor ID (Auto-number)
-  companyLegalName     String?       // A. Company Legal Name (Mandatory)
-  code                 String?       @unique // Retaining old code field if needed
-  
-  // --- A. Company Information (Enhanced) ---
-  vendorType           String        // A. Vendor Type (Keep)
-  ownershipType        String?       // ADDED: e.g., Local, Foreign, JointVenture (JV)
-  businessType         String?       // A. Business Type (Dropdown)
-  licenseNumber        String?       // A. License Number (Mandatory)
-  yearsInBusiness      Int?          // A. Years in Business (Mandatory)
-  gosiEmployeeCount    Int?          // A. GOSI Employee Count (Mandatory)
-  chamberClass         String?       // A. Chamber of Commerce Certificate (Keep)
-  chamberRegion        String?       // A. Chamber of Commerce Region/City
-  chamberExpiryDate    DateTime?     // ADDED: CoC Expiry Date
-  vatNumber            String?       // ADDED: Quick reference VAT Number
-  // mainCategory: String[] removed - replaced by VendorToCategory relation
-  // csiSpecializationId removed - replaced by VendorToCategory relation
-  productsAndServices  String[]      // A. Products & Services (Multi-select, Mandatory)
-  crNumber             String?       @unique // C. Commercial Registration Number (Mandatory)
-  
-  // --- B. Contact Information (Existing fields are kept) ---
-  contactPerson        String?       // B. Contact Person (Mandatory)
-  contactPhone         String?       // B. Phone Number (Mandatory)
-  contactEmail         String?       // B. Email Address (Mandatory)
-  website              String?       // B. Company Website (Optional)
-  addressStreet        String?       // B. Location: Street (Mandatory)
-  addressCity          String?       // B. Location: City (Mandatory)
-  addressRegion        String?       // B. Location: Region/State (Mandatory)
-  addressCountry       String?       // B. Location: Country (Mandatory)
-  primaryContactName   String?       // B. Primary Contact Name (Mandatory)
-  primaryContactTitle  String?       // B. Primary Contact Title (Mandatory)
-  technicalContactName String?       // B. Technical Contact Name
-  technicalContactEmail String?      // B. Technical Contact Email
-  financialContactName String?       // B. Financial Contact Name
-  financialContactEmail String?      // B. Financial Contact Email
+  id                        Int                         @id @default(autoincrement())
+  vendorId                  String?                     @unique
+  companyLegalName          String?
+  code                      String?                     @unique
+  vendorType                String
+  ownershipType             String?
+  businessType              String?
+  licenseNumber             String?
+  yearsInBusiness           Int?
+  gosiEmployeeCount         Int?
+  chamberClass              String?
+  chamberRegion             String?
+  chamberExpiryDate         DateTime?
+  vatNumber                 String?
+  productsAndServices       String[]
+  crNumber                  String?                     @unique
+  contactPerson             String?
+  contactPhone              String?
+  contactEmail              String?
+  website                   String?
+  addressStreet             String?
+  addressCity               String?
+  addressRegion             String?
+  addressCountry            String?
+  primaryContactName        String?
+  primaryContactTitle       String?
+  technicalContactName      String?
+  technicalContactEmail     String?
+  financialContactName      String?
+  financialContactEmail     String?
+  status                    VendorStatus                @default(NEW)
+  kreStatus                 String                      @default("New")
+  reviewNotes               String?
+  reviewStatus              String?
+  vendorClass               String?                     @default("D")
+  qualificationScore        Float?                      @default(0)
+  isQualified               Boolean                     @default(false)
+  assignedReviewerId        Int?
+  lastReviewedById          Int?
+  lastReviewedAt            DateTime?                   @db.Timestamptz
+  nextReviewDate            DateTime?
+  userId                    Int                         @unique
+  logo                      String?                     // ← re-added from localhost
+  csiSpecialization         String?                     // ← kept (was in localhost)
+  mainCategory              String[]                    // ← kept if still used, but consider migrating to relation
+  subCategory               String?
 
-  // --- System/Review Fields (Enhanced) ---
-  status               VendorStatus @default(NEW)
-  kreStatus            String       @default("New")
-  reviewNotes          String?      // Last review notes
-  reviewStatus         String?      // Last review status (redundant with main status, but kept)
-  
-  vendorClass          String?      @default("D") // ADDED: Classification: A, B, C, D
-  qualificationScore   Float?       @default(0)   // UPDATED: Renamed from 'score'
-  isQualified          Boolean      @default(false) // ADDED: Simple flag for quick filtering
+  user                      User                        @relation(fields: [userId], references: [id])
+  projectExperience         VendorProjectExperience[]
+  documents                 VendorDocument[]
+  categories                VendorToCategory[]          @relation("VendorToCategory")
+  assignedReviewer          User?                       @relation("AssignedReviewer", fields: [assignedReviewerId], references: [id])
+  lastReviewedBy            User?                       @relation("LastReviewedBy", fields: [lastReviewedById], references: [id])
+  defaultCsiMaterial        CSI_Material[]              @relation("CSI_MaterialToVendor")
+  priceEntries              PriceEntry[]
+  submissions               RFQSubmission[]
+  contracts                 Contract[]
+  informationRequests       InformationRequest[]
 
-  assignedReviewerId   Int?         // ADDED: ID of the internal user assigned to review
-  lastReviewedById     Int?         // ADDED: ID of the last internal user to review
-   lastReviewedAt       DateTime?    @db.Timestamptz  
-  nextReviewDate       DateTime?    // ADDED: Next scheduled review date
-
-  // --- Relations ---
-  userId               Int          @unique
-  user                 User         @relation(fields: [userId], references: [id])
-  projectExperience    VendorProjectExperience[] // A. Project Experience Table
-  documents            VendorDocument[]          // C. Document Checklist
-  
-  // Updated CSI/Category relationship
-  categories           VendorToCategory[] @relation("VendorToCategory") // UPDATED RELATION NAME
-
-  // Updated Reviewer relationships
-  assignedReviewer     User?        @relation("AssignedReviewer", fields: [assignedReviewerId], references: [id])
-  lastReviewedBy       User?        @relation("LastReviewedBy", fields: [lastReviewedById], references: [id])
-  
-  // ... (Other relations)
-  defaultCsiMaterial   CSI_Material[] @relation("CSI_MaterialToVendor")
-  priceEntries         PriceEntry[]
-  submissions          RFQSubmission[]
-  contracts            Contract[]
-  informationRequests  InformationRequest[]
-  
-  // Audit fields
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
 }
 
-// --- Enhanced VendorDocument Model (The Document Checklist) ---
 model VendorDocument {
-  id            Int                @id @default(autoincrement())
-  vendorId      Int
-  docType       VendorDocumentType // ENUM: COMMERCIAL_REGISTRATION, ZAKAT_CERTIFICATE, etc.
-  url           String             // File URL (Mandatory for checklist)
-  fileName      String             
-  expiryDate    DateTime?          // Expiry Date (Mandatory for some docs)
-  documentNumber String?           // CR Number, VAT Number, GOSI Number, etc.
-  vatNumber      String?           // B. VAT Number
-  gosiNumber     String?           // B. GOSI Number
-  isoType        String?           // B. ISO Type (e.g., 9001, 14001)
-  isValid       Boolean            @default(true) // Set to false if expired
-  uploadedAt    DateTime           @default(now())
-  
-  vendor        Vendor             @relation(fields: [vendorId], references: [id])
+  id              Int                 @id @default(autoincrement())
+  vendorId        Int
+  docType         VendorDocumentType
+  url             String
+  fileName        String
+  expiryDate      DateTime?
+  documentNumber  String?
+  vatNumber       String?
+  gosiNumber      String?
+  isoType         String?
+  isValid         Boolean             @default(true)
+  uploadedAt      DateTime            @default(now())
+
+  vendor          Vendor              @relation(fields: [vendorId], references: [id])
 }
 
 model VendorProjectExperience {
-  id               Int       @id @default(autoincrement())
-  vendorId         Int
-  projectName      String
-  clientName       String
-  contractValue    Float
-  startDate        DateTime?
-  endDate          DateTime?
+  id              Int     @id @default(autoincrement())
+  vendorId        Int
+  projectName     String
+  clientName      String
+  contractValue   Float
+  startDate       DateTime?
+  endDate         DateTime?
   scopeDescription String?
   referenceContact String?
-  completionFile   String? // URL
-  vendor           Vendor    @relation(fields: [vendorId], references: [id])
+  completionFile  String?
+
+  vendor          Vendor  @relation(fields: [vendorId], references: [id])
 }
 
-// --- CSI / Category Master List (Renamed from VendorCategory) ---
 model Category {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique // e.g., "Architectural Finishes"
-  csiCode     String?  @unique // e.g., "09" (CSI Division)
+  id          Int                 @id @default(autoincrement())
+  name        String              @unique
+  csiCode     String?             @unique
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
-  // Relation to the link table
-  vendors     VendorToCategory[] 
+  vendors     VendorToCategory[]
 }
 
-// --- Intermediary Table for Many-to-Many relationship (Vendor <-> Category) ---
 model VendorToCategory {
-  id         Int      @id @default(autoincrement())
-  vendorId   Int
-  categoryId Int
+  id          Int     @id @default(autoincrement())
+  vendorId    Int
+  categoryId  Int
 
-  vendor     Vendor   @relation("VendorToCategory", fields: [vendorId], references: [id])
-  category   Category @relation(fields: [categoryId], references: [id])
+  vendor      Vendor  @relation("VendorToCategory", fields: [vendorId], references: [id])
+  category    Category @relation(fields: [categoryId], references: [id])
 
-  @@unique([vendorId, categoryId]) // Prevents duplicate links
+  @@unique([vendorId, categoryId])
 }
+
 
 model CSI_Material {
   id              Int          @id @default(autoincrement())
@@ -279,8 +408,8 @@ model PriceEntry {
 }
 
 model RFQ {
-  id                   Int             @id @default(autoincrement())
-  rfqNumber            String          @unique
+  id                   Int                  @id @default(autoincrement())
+  rfqNumber            String               @unique
   projectName          String
   packageScope         String?
   itemDesc             String?
@@ -288,19 +417,19 @@ model RFQ {
   estimatedUnitPrice   Float?
   requiredDate         DateTime?
   targetSubmissionDate DateTime?
-  currency             String          @default("SAR")
+  currency             String               @default("SAR")
   createdById          Int
-  status               RFQStatus       @default(DRAFT)
-  createdAt            DateTime        @default(now())
+  status               RFQStatus            @default(DRAFT)
+  createdAt            DateTime             @default(now())
   description          String?
   dueDate              DateTime?
   title                String
-  updatedAt            DateTime        @updatedAt
-  contracts            Contract[]      @relation("RFQContract")
-  createdBy            User            @relation("UserRFQs", fields: [createdById], references: [id])
-  informationRequests  InformationRequest[]
+  updatedAt            DateTime             @updatedAt
+  contracts            Contract[]           @relation("RFQContract")
+  createdBy            User                 @relation("UserRFQs", fields: [createdById], references: [id])
   submissions          RFQSubmission[]
-  attachments          Document[]      @relation("rfqAttachments")
+  rfqAttachments       rfqAttachments[]
+  informationRequests  InformationRequest[]
 }
 
 model RFQSubmission {
@@ -348,9 +477,9 @@ model Contract {
   createdAt       DateTime         @default(now())
   rfq             RFQ?             @relation("RFQContract", fields: [rfqId], references: [id])
   vendor          Vendor           @relation(fields: [vendorId], references: [id])
-  documents       Document[]       @relation("ContractDocuments")
   ipcs            IPC[]
   variationOrders VariationOrder[]
+  documents       Document[]       @relation("ContractDocuments")
 }
 
 model VariationOrder {
@@ -379,237 +508,190 @@ model IPC {
   status          IPCStatus  @default(SUBMITTED)
   submittedById   Int
   createdAt       DateTime   @default(now())
-  attachments     Document[] @relation("IPCAttachments")
   contract        Contract   @relation(fields: [contractId], references: [id])
   submittedBy     User       @relation("UserIPCs", fields: [submittedById], references: [id])
+  attachments     Document[] @relation("IPCAttachments")
 }
 
-// Add this model to your schema
 model InformationRequest {
-  id            Int        @id @default(autoincrement())
-  uuid          String     @unique @default(uuid())
-  title         String
-  description   String?
-  requestType   String     // DOCUMENT_REQUEST, CLARIFICATION, INFO_REQUEST, UPDATE_REQUEST
-  status        RequestStatus @default(PENDING)
-  priority      Priority   @default(MEDIUM)
-  
-  vendorId      Int
-  vendor        Vendor     @relation(fields: [vendorId], references: [id])
-  
-  createdById   Int
-  createdBy     User       @relation(fields: [createdById], references: [id])
-  createdByName String?
-  
-  dueDate       DateTime
-  responseDate  DateTime?
-  responseText  String?
-  responseFiles Document[] @relation("InformationRequestResponseFiles")
-  
-  rejectionReason String?
-  approvedDate   DateTime?
-  
-  // For linking to specific documents or RFQs
-  documentId    Int?
-  document      Document?  @relation("RequestLinkedDocument", fields: [documentId], references: [id])
-  rfqId        Int?
-  rfq          RFQ?       @relation(fields: [rfqId], references: [id])
-  
-  attachments  Document[] @relation("InformationRequestAttachments")
-  
-  // Timeline for tracking status changes
-  timeline     Json?
-  
-  // Notification tracking
-  notificationCount Int @default(0)
-  lastNotified DateTime?
-  
-  // Audit fields
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  
+  id                Int           @id @default(autoincrement())
+  uuid              String        @unique @default(uuid())
+  title             String
+  description       String?
+  requestType       String
+  status            RequestStatus @default(PENDING)
+  priority          Priority      @default(MEDIUM)
+  vendorId          Int
+  createdById       Int
+  createdByName     String?
+  dueDate           DateTime
+  responseDate      DateTime?
+  responseText      String?
+  rejectionReason   String?
+  approvedDate      DateTime?
+  documentId        Int?
+  rfqId             Int?
+  timeline          Json?
+  notificationCount Int           @default(0)
+  lastNotified      DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  createdBy         User          @relation(fields: [createdById], references: [id])
+  document          Document?     @relation("RequestLinkedDocument", fields: [documentId], references: [id])
+  rfq               RFQ?          @relation(fields: [rfqId], references: [id])
+  vendor            Vendor        @relation(fields: [vendorId], references: [id])
+  attachments       Document[]    @relation("InformationRequestAttachments")
+  responseFiles     Document[]    @relation("InformationRequestResponseFiles")
+
   @@index([vendorId, status])
   @@index([dueDate])
   @@index([createdById])
   @@map("information_requests")
 }
 
-
-// Enhanced Document Model with Version Control
 model Document {
-  id             Int       @id @default(autoincrement())
-  fileName       String
-  fileUrl        String
-  url            String
-  mimeType       String?
-  size           Int?
-  uploadedById   Int?
-  uploadedAt     DateTime  @default(now())
-  
-  // Version Control Fields
-  version        Int       @default(1)
-  isCurrent      Boolean   @default(true)
-  previousVersionId Int?
-  previousVersion Document? @relation("DocumentVersions", fields: [previousVersionId], references: [id])
-  nextVersions   Document[] @relation("DocumentVersions")
-  
-  // Digital Signature Fields
-  requiresSignature Boolean @default(false)
-  signatureStatus   SignatureStatus @default(NOT_REQUIRED)
-  signedById      Int?
-  signedBy        User?    @relation("SignedDocuments", fields: [signedById], references: [id])
-  signedAt        DateTime?
-  
-  // Approval Workflow - FIXED: Use DRAFT instead of PENDING
-  approvalStatus  DocumentApprovalStatus @default(DRAFT)
-  approvalWorkflowId Int?
-  approvalWorkflow DocumentApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
-  
-  // Relations
-  ipcId          Int?
-  contractId     Int?
-  contract       Contract? @relation("ContractDocuments", fields: [contractId], references: [id])
-  ipc            IPC?      @relation("IPCAttachments", fields: [ipcId], references: [id])
-  uploadedBy     User?     @relation("uploadedBy", fields: [uploadedById], references: [id])
-  rfqAttachments RFQ[]     @relation("rfqAttachments")
+  id                            Int                       @id @default(autoincrement())
+  fileName                      String
+  fileUrl                       String
+  url                           String
+  mimeType                      String?
+  size                          Int?
+  uploadedById                  Int?
+  uploadedAt                    DateTime                  @default(now())
+  version                       Int                       @default(1)
+  isCurrent                     Boolean                   @default(true)
+  previousVersionId             Int?
+  requiresSignature             Boolean                   @default(false)
+  signatureStatus               SignatureStatus           @default(NOT_REQUIRED)
+  signedById                    Int?
+  signedAt                      DateTime?
+  approvalStatus                DocumentApprovalStatus    @default(DRAFT)
+  approvalWorkflowId            Int?
+  ipcId                         Int?
+  contractId                    Int?
+  tags                          String[]
+  category                      String?
+  description                   String?
+  documentApprovals             DocumentApproval[]        @relation("DocumentApprovals")
+  rfqAttachments                rfqAttachments[]
+  approvalWorkflow              DocumentApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
+  contract                      Contract?                 @relation("ContractDocuments", fields: [contractId], references: [id])
+  ipc                           IPC?                      @relation("IPCAttachments", fields: [ipcId], references: [id])
+  previousVersion               Document?                 @relation("DocumentVersions", fields: [previousVersionId], references: [id])
+  nextVersions                  Document[]                @relation("DocumentVersions")
+  signedBy                      User?                     @relation("SignedDocuments", fields: [signedById], references: [id])
+  uploadedBy                    User?                     @relation("uploadedBy", fields: [uploadedById], references: [id])
+  linkedInformationRequests     InformationRequest[]      @relation("RequestLinkedDocument")
+  signatureRequests             SignatureRequest[]        @relation("DocumentSignatureRequests")
+  informationRequestAttachments InformationRequest[]      @relation("InformationRequestAttachments")
+  informationRequestResponses   InformationRequest[]      @relation("InformationRequestResponseFiles")
 
-  informationRequestResponses InformationRequest[] @relation("InformationRequestResponseFiles")
-  linkedInformationRequests  InformationRequest[] @relation("RequestLinkedDocument")
-  informationRequestAttachments InformationRequest[] @relation("InformationRequestAttachments")
-
-  // Add this relation at the end:
-  documentApprovals DocumentApproval[] @relation("DocumentApprovals")
-
-  // 👇 ADD THIS: Inverse relation for SignatureRequest
-  signatureRequests SignatureRequest[] @relation("DocumentSignatureRequests")
-  
-  // Document metadata for search
-  tags           String[]
-  category       String?
-  description    String?
-  
   @@map("documents")
 }
 
-// Document Approval Workflow
 model DocumentApprovalWorkflow {
-  id          Int       @id @default(autoincrement())
+  id          Int                    @id @default(autoincrement())
   name        String
   description String?
+  createdAt   DateTime               @default(now())
+  isActive    Boolean                @default(true)
   steps       DocumentApprovalStep[]
   documents   Document[]
-  createdAt   DateTime  @default(now())
-  isActive    Boolean   @default(true)
 }
 
 model DocumentApprovalStep {
-  id          Int       @id @default(autoincrement())
-  workflowId  Int
-  sequence    Int
-  roleId      Int
-  role        Role      @relation(fields: [roleId], references: [id])
-  isRequired  Boolean   @default(true)
-  workflow    DocumentApprovalWorkflow @relation(fields: [workflowId], references: [id])
+  id                Int                      @id @default(autoincrement())
+  workflowId        Int
+  sequence          Int
+  roleId            Int
+  isRequired        Boolean                  @default(true)
+  documentApprovals DocumentApproval[]       @relation("DocumentApprovalSteps")
+  role              Role                     @relation(fields: [roleId], references: [id])
+  workflow          DocumentApprovalWorkflow @relation(fields: [workflowId], references: [id])
 
-  // Add this relation:
-  documentApprovals DocumentApproval[] @relation("DocumentApprovalSteps")
-  
   @@unique([workflowId, sequence])
 }
 
 model DocumentApproval {
-  id          Int       @id @default(autoincrement())
-  documentId  Int
-  stepId      Int
-  approverId  Int
-  status      ApprovalStatus @default(PENDING)
-  comments    String?
-  approvedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  
-  // Add the inverse relations with the same relation names:
-  document    Document  @relation("DocumentApprovals", fields: [documentId], references: [id])
-  step        DocumentApprovalStep @relation("DocumentApprovalSteps", fields: [stepId], references: [id])
-  approver    User      @relation("DocumentApprovalApprover", fields: [approverId], references: [id])
-  
+  id         Int                  @id @default(autoincrement())
+  documentId Int
+  stepId     Int
+  approverId Int
+  status     ApprovalStatus       @default(PENDING)
+  comments   String?
+  approvedAt DateTime?
+  createdAt  DateTime             @default(now())
+  approver   User                 @relation("DocumentApprovalApprover", fields: [approverId], references: [id])
+  document   Document             @relation("DocumentApprovals", fields: [documentId], references: [id])
+  step       DocumentApprovalStep @relation("DocumentApprovalSteps", fields: [stepId], references: [id])
+
   @@unique([documentId, stepId])
 }
 
-// Document Templates
 model DocumentTemplate {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   name        String
   description String?
   category    String
   fileUrl     String?
-  content     Json?     // For dynamic templates
-  variables   Json?     // Template variables schema
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
+  content     Json?
+  variables   Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
   createdById Int
-  createdBy   User      @relation("DocumentTemplateCreator", fields: [createdById], references: [id])
+  createdBy   User     @relation("DocumentTemplateCreator", fields: [createdById], references: [id])
 }
 
 model Approval {
-  id           String   @id @default(cuid())
-  entityType   String   // VENDOR, RFQ, CONTRACT, PO, etc.
-  entityId     String
-  status       ApprovalStatus @default(PENDING)
-  sequence     Int?     // Add this field - it was missing
-  comments     String?
-  
-  // Relations - UPDATED with relation names
-  requestedById Int
-  requestedBy   User    @relation("UserRequestedApprovals", fields: [requestedById], references: [id]) // <-- ADD RELATION NAME
-  approverId    Int?
-  approver      User?   @relation("UserApprovals", fields: [approverId], references: [id]) // <-- ADD RELATION NAME
-  
-  // Advanced workflow fields
+  id                String            @id @default(cuid())
+  entityType        String
+  entityId          String
+  approverId        Int?
+  sequence          Int?
+  status            ApprovalStatus    @default(PENDING)
+  createdAt         DateTime          @default(now())
+  currentStep       Int               @default(0)
+  escalationLevel   Int?
+  parallelApprovals Boolean           @default(false)
+  slaBreached       Boolean           @default(false)
+  slaDeadline       DateTime?
+  stepRequirements  Json?
+  totalSteps        Int               @default(1)
   workflowId        String?
+  comments          String?
+  requestedById     Int
+  updatedAt         DateTime          @updatedAt
+  approver          User?             @relation("UserApprovals", fields: [approverId], references: [id])
+  requestedBy       User              @relation("UserRequestedApprovals", fields: [requestedById], references: [id])
   workflow          ApprovalWorkflow? @relation(fields: [workflowId], references: [id])
-  currentStep      Int     @default(0)
-  totalSteps       Int     @default(1)
-  stepRequirements Json?
-  parallelApprovals Boolean @default(false)
-  escalationLevel  Int?
-  slaDeadline      DateTime?
-  slaBreached      Boolean @default(false)
-  
-  // Timestamps
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
-  // Relations
-  steps    ApprovalStep[]
-  
-  @@map("Approval")
+  steps             ApprovalStep[]
+
   @@index([entityType, entityId])
   @@index([status])
   @@index([requestedById])
+  @@map("Approval")
 }
 
-// Add these models to your existing schema
 model ApprovalWorkflow {
-  id          String   @id @default(cuid())
-  name        String   @db.VarChar(255)
+  id          String     @id @default(cuid())
+  name        String     @db.VarChar(255)
   description String?
-  entityType  String   @db.VarChar(50) // VENDOR, RFQ, CONTRACT, PO, etc.
+  entityType  String     @db.VarChar(50)
   conditions  Json?
   steps       Json
-  isActive    Boolean  @default(true)
+  isActive    Boolean    @default(true)
   createdById Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  approvals   Approval[]
+  createdBy   User       @relation("ApprovalWorkflowCreator", fields: [createdById], references: [id])
 
-  createdBy User    @relation("ApprovalWorkflowCreator", fields: [createdById], references: [id]) // <--- ADD RELATION NAME
-  approvals Approval[]
-
-  @@map("ApprovalWorkflow")
+  @@map("ApprovalWorkflow")
 }
 
 model ApprovalStep {
   id           String         @id @default(cuid())
-  approvalId   String         // <-- CHANGED BACK TO String to match Approval.id
+  approvalId   String
   stepNumber   Int
   stepName     String         @db.VarChar(255)
   approverRole Int
@@ -621,90 +703,79 @@ model ApprovalStep {
   slaDeadline  DateTime?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
+  approval     Approval       @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  approver     User?          @relation("ApprovalStepApprover", fields: [approverId], references: [id])
 
-  approval Approval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
-  approver User?    @relation("ApprovalStepApprover", fields: [approverId], references: [id])
-
-  @@map("ApprovalStep")
   @@index([approvalId])
   @@index([approverId])
   @@index([status])
+  @@map("ApprovalStep")
 }
 
-// Approval Workflow Templates
 model ApprovalWorkflowTemplate {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  category    String   // "VENDOR_QUALIFICATION", "CONTRACT", "PO", "IPC"
-  steps       ApprovalWorkflowStep[]
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  approvalInstances ApprovalInstance[] @relation("ApprovalWorkflowInstances") // 👈 ADD THIS
+  id                String                 @id @default(uuid())
+  name              String
+  description       String?
+  category          String
+  isActive          Boolean                @default(true)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  approvalInstances ApprovalInstance[]     @relation("ApprovalWorkflowInstances")
+  steps             ApprovalWorkflowStep[]
 
   @@map("approval_workflow_templates")
 }
 
 model ApprovalWorkflowStep {
-  id          String   @id @default(uuid())
-  templateId  String
-  sequence    Int
-  roleId      Int
-  role        Role     @relation(fields: [roleId], references: [id])
-  isRequired  Boolean  @default(true)
-  minAmount   Float?   // Minimum amount for this step to trigger
-  maxAmount   Float?   // Maximum amount for this step
-  conditions  Json?    // Additional conditions for routing
-  
-  template    ApprovalWorkflowTemplate @relation(fields: [templateId], references: [id])
+  id              String                   @id @default(uuid())
+  templateId      String
+  sequence        Int
+  roleId          Int
+  isRequired      Boolean                  @default(true)
+  minAmount       Float?
+  maxAmount       Float?
+  conditions      Json?
+  approvalActions ApprovalAction[]         @relation("ApprovalWorkflowStepActions")
+  role            Role                     @relation(fields: [roleId], references: [id])
+  template        ApprovalWorkflowTemplate @relation(fields: [templateId], references: [id])
 
-  // Add this relation:
-  approvalActions ApprovalAction[] @relation("ApprovalWorkflowStepActions") // 👈 ADD THIS
-  
   @@unique([templateId, sequence])
   @@map("approval_workflow_steps")
 }
 
-// Active Approval Instances
 model ApprovalInstance {
-  id          String   @id @default(uuid())
-  entityType  String   // "VENDOR", "CONTRACT", "PO", "IPC"
+  id          String                   @id @default(uuid())
+  entityType  String
   entityId    Int
   workflowId  String
-  status      ApprovalInstanceStatus @default(PENDING)
-  currentStep Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  workflow    ApprovalWorkflowTemplate @relation("ApprovalWorkflowInstances", fields: [workflowId], references: [id]) // 👈 ADD RELATION NAME
+  status      ApprovalInstanceStatus   @default(PENDING)
+  currentStep Int                      @default(0)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
   approvals   ApprovalAction[]
-  
+  workflow    ApprovalWorkflowTemplate @relation("ApprovalWorkflowInstances", fields: [workflowId], references: [id])
+
   @@unique([entityType, entityId])
   @@map("approval_instances")
 }
 
 model ApprovalAction {
-  id          String         @id @default(uuid())
-  instanceId  String
-  stepId      String
-  approverId  Int
-  status      ApprovalStatus @default(PENDING)
-  comments    String?
-  signedAt    DateTime?
-  signatureData Json?        // Digital signature data
-  metadata    Json?          // Additional approval data
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id                String               @id @default(uuid())
+  instanceId        String
+  stepId            String
+  approverId        Int
+  status            ApprovalStatus       @default(PENDING)
+  comments          String?
+  signedAt          DateTime?
+  signatureData     Json?
+  metadata          Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  approver          User                 @relation("ApprovalActionApprover", fields: [approverId], references: [id])
+  instance          ApprovalInstance     @relation(fields: [instanceId], references: [id])
+  step              ApprovalWorkflowStep @relation("ApprovalWorkflowStepActions", fields: [stepId], references: [id])
+  signatureRequests SignatureRequest[]   @relation("ApprovalActionSignatureRequests")
 
-  instance    ApprovalInstance @relation(fields: [instanceId], references: [id])
-  step        ApprovalWorkflowStep @relation("ApprovalWorkflowStepActions", fields: [stepId], references: [id]) // 👈 ADD RELATION NAME
-  approver    User           @relation("ApprovalActionApprover", fields: [approverId], references: [id]) // 👈 ADD RELATION NAME
-
-  // 👇 ADD THIS: Inverse relation for SignatureRequest
-  signatureRequests SignatureRequest[] @relation("ApprovalActionSignatureRequests")
-    
   @@unique([instanceId, stepId])
   @@map("approval_actions")
 }
@@ -720,75 +791,67 @@ model AuditLog {
   user      User?    @relation("UserAuditLogs", fields: [userId], references: [id])
 }
 
-
-// In your Notification model, update to:
 model Notification {
-  id          Int       @id @default(autoincrement())
-  userId      Int
-  title       String
-  body        String?
-  type        String    @default("INFO") // INFO, WARNING, REMINDER, ERROR
-  priority    String    @default("MEDIUM") // LOW, MEDIUM, HIGH
-  read        Boolean   @default(false)
-  readAt      DateTime?
-  actionUrl   String?   // URL for the notification action
-  metadata    Json?     // Additional data for the notification
-  createdAt   DateTime  @default(now())
-  
-  // Fix: Add relation name to match User model
-  user        User      @relation("UserNotifications", fields: [userId], references: [id])
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  title     String
+  body      String?
+  type      String    @default("INFO")
+  priority  String    @default("MEDIUM")
+  read      Boolean   @default(false)
+  readAt    DateTime?
+  actionUrl String?
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  user      User      @relation("UserNotifications", fields: [userId], references: [id])
 
   @@map("notifications")
 }
 
-
 model Report {
-  id              Int              @id @default(autoincrement())
-  name            String
-  description     String?
-  category        String
-  dataSource      String
-  createdById     Int
-  isPublic        Boolean          @default(false)
-  isScheduled     Boolean          @default(false)
+  id                Int                  @id @default(autoincrement())
+  name              String
+  description       String?
+  category          String
+  dataSource        String
+  createdById       Int
+  isPublic          Boolean              @default(false)
+  isScheduled       Boolean              @default(false)
   scheduleFrequency String?
-  nextSchedule    DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  
-  createdBy       User             @relation("UserCreatedReports", fields: [createdById], references: [id])
-  filters         ReportFilter[]
-  columns         ReportColumn[]
-  executions      ReportExecution[]
-  favorites       UserReportFavorite[]
+  nextSchedule      DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  createdBy         User                 @relation("UserCreatedReports", fields: [createdById], references: [id])
+  columns           ReportColumn[]
+  executions        ReportExecution[]
+  filters           ReportFilter[]
+  favorites         UserReportFavorite[]
 }
 
 model ReportFilter {
-  id        Int    @id @default(autoincrement()) // Changed from String
-  reportId  Int                                  // Changed from String
-  field     String  // Match backend field name
+  id        Int    @id @default(autoincrement())
+  reportId  Int
+  field     String
   operator  String
   value     String
   sortOrder Int    @default(0)
-  
   report    Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 }
 
 model ReportColumn {
-  id              Int    @id @default(autoincrement()) // Changed from String
-  reportId        Int                                  // Changed from String
+  id              Int    @id @default(autoincrement())
+  reportId        Int
   fieldName       String
   columnLabel     String
-  dataType        String  // Simplified to match backend
-  aggregationType String  @default("NONE") // Simplified
-  sortOrder       Int     @default(0)
-  
-  report          Report  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  dataType        String
+  aggregationType String @default("NONE")
+  sortOrder       Int    @default(0)
+  report          Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 }
 
 model ReportExecution {
   id            Int      @id @default(autoincrement())
-  reportId      Int                                    
+  reportId      Int
   executedById  Int
   status        String
   parameters    Json?
@@ -797,250 +860,79 @@ model ReportExecution {
   errorMessage  String?
   filePath      String?
   executedAt    DateTime @default(now())
-  
-  report       Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  executedBy   User   @relation("UserReportExecutions", fields: [executedById], references: [id]) // ADDED relation name
+  executedBy    User     @relation("UserReportExecutions", fields: [executedById], references: [id])
+  report        Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
 }
 
 model UserReportFavorite {
-  id       Int @id @default(autoincrement())
+  id       Int    @id @default(autoincrement())
   userId   Int
   reportId Int
-  
-  user   User   @relation("UserReportFavorites", fields: [userId], references: [id]) // ADDED relation name
-  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user     User   @relation("UserReportFavorites", fields: [userId], references: [id])
 
   @@unique([userId, reportId])
 }
 
-// Report Templates (Pre-built reports)
 model ReportTemplate {
   id          String         @id @default(uuid())
   name        String
   description String?
   category    ReportCategory
   dataSource  String
-  template    Json           // Complete report definition
+  template    Json
   isActive    Boolean        @default(true)
   createdAt   DateTime       @default(now())
-  
+
   @@map("report_templates")
 }
 
 model Task {
-  id          Int       @id @default(autoincrement())
-  title       String
-  description String?
-  taskType    TaskType
-  assignedTo  Int       // User ID
-  assignedById Int      // User ID who assigned the task
-  dueDate     DateTime
-  priority    Priority  @default(MEDIUM)
-  status      TaskStatus @default(NOT_STARTED)
-  remarks     String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  // Relations
-  assignedUser   User   @relation("AssignedTasks", fields: [assignedTo], references: [id])
-  assignedByUser User   @relation("CreatedTasks", fields: [assignedById], references: [id])
+  id             Int        @id @default(autoincrement())
+  title          String
+  description    String?
+  taskType       TaskType
+  assignedTo     Int
+  assignedById   Int
+  dueDate        DateTime
+  priority       Priority   @default(MEDIUM)
+  status         TaskStatus @default(NOT_STARTED)
+  remarks        String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  assignedByUser User       @relation("CreatedTasks", fields: [assignedById], references: [id])
+  assignedUser   User       @relation("AssignedTasks", fields: [assignedTo], references: [id])
 }
 
 model SignatureRequest {
-  id                String   @id @default(uuid())
-  approvalActionId  String
-  documentId        Int
-  requesterId       Int
-  signerId          Int?
-  status            SignatureRequestStatus @default(PENDING)
-  signatureData     Json?    // Stores signature image/data
-  ipAddress         String?  // IP address where signed
-  expiresAt         DateTime
-  signedAt          DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  // Relations - FIXED: Added relation names
-  approvalAction ApprovalAction @relation("ApprovalActionSignatureRequests", fields: [approvalActionId], references: [id], onDelete: Cascade)
-  document       Document       @relation("DocumentSignatureRequests", fields: [documentId], references: [id])
-  requester      User           @relation("SignatureRequestRequester", fields: [requesterId], references: [id])
-  signer         User?          @relation("SignatureRequestSigner", fields: [signerId], references: [id])
+  id               String                 @id @default(uuid())
+  approvalActionId String
+  documentId       Int
+  requesterId      Int
+  signerId         Int?
+  status           SignatureRequestStatus @default(PENDING)
+  signatureData    Json?
+  ipAddress        String?
+  expiresAt        DateTime
+  signedAt         DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  approvalAction   ApprovalAction         @relation("ApprovalActionSignatureRequests", fields: [approvalActionId], references: [id], onDelete: Cascade)
+  document         Document               @relation("DocumentSignatureRequests", fields: [documentId], references: [id])
+  requester        User                   @relation("SignatureRequestRequester", fields: [requesterId], references: [id])
+  signer           User?                  @relation("SignatureRequestSigner", fields: [signerId], references: [id])
 
   @@unique([approvalActionId, documentId])
   @@map("signature_requests")
 }
 
-enum SignatureRequestStatus {
-  PENDING
-  SIGNED
-  EXPIRED
-  CANCELLED
-}
+model rfqAttachments {
+  A         Int
+  B         Int
+  documents Document @relation(fields: [A], references: [id], onDelete: Cascade)
+  RFQ       RFQ      @relation(fields: [B], references: [id], onDelete: Cascade)
 
-enum TaskType {
-  VENDOR_REVIEW
-  RFQ_EVALUATION
-  CONTRACT_REVIEW
-  IPC_PROCESSING
-  DOCUMENT_VERIFICATION
-  PROJECT_FOLLOWUP
-  GENERAL
-}
-
-enum Priority {
-  LOW
-  MEDIUM
-  HIGH
-  URGENT
-}
-
-enum TaskStatus {
-  NOT_STARTED
-  IN_PROGRESS
-  COMPLETED
-  OVERDUE
-  CANCELLED
-}
-
-// Report Categories Enum
-enum ReportCategory {
-  FINANCIAL
-  VENDOR
-  CONTRACT
-  PROJECT
-  CUSTOM
-}
-
-// Report Schedule Frequency Enum
-enum ReportFrequency {
-  DAILY
-  WEEKLY
-  MONTHLY
-  QUARTERLY
-}
-
-// Filter Types Enum
-enum FilterType {
-  DATE
-  SELECT
-  MULTISELECT
-  NUMBER
-  TEXT
-  BOOLEAN
-}
-
-// Data Types Enum
-enum DataType {
-  STRING
-  NUMBER
-  DATE
-  CURRENCY
-  PERCENTAGE
-  BOOLEAN
-}
-
-// Aggregation Types Enum
-enum AggregationType {
-  SUM
-  AVERAGE
-  COUNT
-  MIN
-  MAX
-  NONE
-}
-
-// Report Status Enum
-enum ReportStatus {
-  DRAFT
-  ACTIVE
-  ARCHIVED
-}
-
-// Report Execution Status Enum
-enum ExecutionStatus {
-  RUNNING
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-enum UserStatus {
-  PENDING
-  ACTIVE
-}
-
-enum RoleName {
-  ADMIN
-  PROCUREMENT_MANAGER
-  PROCUREMENT_ENGINEER
-  COST_MANAGER
-  PROJECT_MANAGER
-  TECHNICAL_OFFICE
-  DATA_CONTROLLER
-  VENDOR_USER
-}
-
-enum RFQStatus {
-  DRAFT
-  ISSUED
-  OPEN
-  CLOSED
-  AWARDED
-  CANCELED
-}
-
-enum IPCStatus {
-  SUBMITTED
-  PROCUREMENT_REVIEW
-  TECHNICAL_APPROVED
-  FINANCE_REVIEW
-  APPROVED
-  PAID
-  REJECTED
-}
-
-// Enums for new functionality
-enum SignatureStatus {
-  NOT_REQUIRED
-  PENDING_SIGNATURE
-  SIGNED
-  REJECTED
-  EXPIRED
-}
-
-enum DocumentApprovalStatus {
-  DRAFT
-  PENDING_APPROVAL
-  IN_REVIEW
-  APPROVED
-  REJECTED
-  CHANGES_REQUESTED
-}
-
-// Add this enum to your existing enums section
-enum RequestStatus {
-  PENDING
-  SUBMITTED
-  APPROVED
-  REJECTED
-  OVERDUE
-  CANCELLED
-}
-
-// Enums for approval system
-enum ApprovalInstanceStatus {
-  PENDING
-  IN_PROGRESS
-  APPROVED
-  REJECTED
-  CANCELLED
-  ESCALATED
-}
-
-enum ApprovalStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  RETURNED
-  ESCALATED
+  @@unique([A, B], map: "_rfqAttachments_AB_unique")
+  @@index([B], map: "_rfqAttachments_B_index")
+  @@map("_rfqAttachments")
 }
