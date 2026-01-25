@@ -22,7 +22,7 @@ let isDatabaseConnected = false
 
 // Connection retry function
 async function initializeDatabase() {
-  const maxRetries = 5
+  const maxRetries = 2
   let delay = 2000
 
   for (let i = 0; i < maxRetries; i++) {
