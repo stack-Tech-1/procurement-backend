@@ -1,5 +1,5 @@
 import prisma from '../config/prismaClient.js';
-import { getSignedUrl } from '../lib/supabaseAdmin.js';
+import { generatePresignedUrl, getPublicUrl } from '../lib/awsS3.js';
 
 export class DocumentService {
   
@@ -49,7 +49,7 @@ export class DocumentService {
     });
   }
 
-  // Get document with signed URL
+  // Get document with signed URL - UPDATED FOR AWS S3
   async getDocumentWithUrl(documentId, userId) {
     const document = await prisma.document.findUnique({
       where: { id: documentId },
@@ -78,12 +78,22 @@ export class DocumentService {
       throw new Error('Document not found');
     }
 
-    // Generate signed URL for secure access
-    const signedUrl = await getSignedUrl(document.fileUrl, 300); // 5 minutes
+    // Generate presigned URL for AWS S3 access (valid for 1 hour)
+    let signedUrl = document.fileUrl; // Default to stored URL
+    
+    // If fileUrl is an S3 key (not a full URL), generate presigned URL
+    if (document.fileUrl && !document.fileUrl.startsWith('http')) {
+      signedUrl = await generatePresignedUrl(document.fileUrl, 3600);
+    }
+    
+    // If still no signed URL, try to get public URL
+    if (!signedUrl && document.fileUrl && !document.fileUrl.startsWith('http')) {
+      signedUrl = getPublicUrl(document.fileUrl);
+    }
 
     return {
       ...document,
-      signedUrl
+      signedUrl: signedUrl || document.fileUrl
     };
   }
 
@@ -109,7 +119,24 @@ export class DocumentService {
       }
     });
 
-    return documents;
+    // Generate presigned URLs for all documents in history
+    const documentsWithUrls = await Promise.all(
+      documents.map(async (doc) => {
+        let signedUrl = doc.fileUrl;
+        
+        // Generate presigned URL for AWS S3 keys
+        if (doc.fileUrl && !doc.fileUrl.startsWith('http')) {
+          signedUrl = await generatePresignedUrl(doc.fileUrl, 3600) || getPublicUrl(doc.fileUrl) || doc.fileUrl;
+        }
+        
+        return {
+          ...doc,
+          signedUrl
+        };
+      })
+    );
+
+    return documentsWithUrls;
   }
 
   // Bulk document operations
@@ -148,8 +175,25 @@ export class DocumentService {
       prisma.document.count({ where })
     ]);
 
+    // Generate presigned URLs for all search results
+    const documentsWithUrls = await Promise.all(
+      documents.map(async (document) => {
+        let signedUrl = document.fileUrl;
+        
+        // Generate presigned URL for AWS S3 keys
+        if (document.fileUrl && !document.fileUrl.startsWith('http')) {
+          signedUrl = await generatePresignedUrl(document.fileUrl, 3600) || getPublicUrl(document.fileUrl) || document.fileUrl;
+        }
+        
+        return {
+          ...document,
+          signedUrl
+        };
+      })
+    );
+
     return {
-      documents,
+      documents: documentsWithUrls,
       pagination: {
         page,
         pageSize,
@@ -240,5 +284,64 @@ export class DocumentService {
     await Promise.all(approvalPromises);
 
     return document;
+  }
+
+  // NEW: Update document with S3 file
+  async updateDocumentWithS3File(documentId, s3Key, metadata = {}) {
+    const document = await prisma.document.update({
+      where: { id: documentId },
+      data: {
+        fileUrl: s3Key, // Store S3 key, not full URL
+        fileName: metadata.fileName || 'document',
+        mimeType: metadata.mimeType || 'application/octet-stream',
+        fileSize: metadata.fileSize || 0,
+        uploadedAt: new Date(),
+        ...metadata
+      }
+    });
+
+    return document;
+  }
+
+  // NEW: Get presigned URL for specific document
+  async getPresignedUrlForDocument(documentId, expiresIn = 3600) {
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { fileUrl: true }
+    });
+
+    if (!document || !document.fileUrl) {
+      throw new Error('Document not found');
+    }
+
+    // If it's already a full URL, return it
+    if (document.fileUrl.startsWith('http')) {
+      return document.fileUrl;
+    }
+
+    // Generate presigned URL for S3 key
+    return await generatePresignedUrl(document.fileUrl, expiresIn);
+  }
+
+  // NEW: Delete document from S3 and database
+  async deleteDocument(documentId) {
+    const document = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { fileUrl: true, id: true }
+    });
+
+    if (!document) {
+      throw new Error('Document not found');
+    }
+
+    // TODO: Implement S3 deletion if needed
+    // For now, just delete from database
+    // Note: In production, you might want to implement soft delete
+    
+    const deletedDocument = await prisma.document.delete({
+      where: { id: documentId }
+    });
+
+    return deletedDocument;
   }
 }

@@ -204,57 +204,46 @@ export const getMyQualificationDetails = async (req, res) => {
         
         // 4. Generate proper logo URL if it exists - UPDATED FIX
         let logoUrl = vendor.logo;
-        console.log('🔍 Original logo URL:', logoUrl);
-        
+
         if (logoUrl) {
-            // Special case: Check for your specific problematic URL pattern
-            if (logoUrl.includes('blob%3Ahttp%3A//localhost%3A3000/')) {
-                console.warn('❌ Found blob URL stored in S3, this is invalid');
-                
-                // Set to null since this is a broken blob URL
-                logoUrl = null;
-                
-                // Optional: Try to find the actual logo file in documents
-                const logoDocument = vendor.documents.find(doc => 
-                    doc.docType === 'COMPANY_LOGO' || 
-                    doc.docType === 'LOGO' ||
-                    (doc.fileName && doc.fileName.toLowerCase().includes('logo'))
-                );
-                
-                if (logoDocument) {
-                    console.log('📦 Found logo in documents:', logoDocument);
-                    try {
-                        logoUrl = await generatePresignedUrl(logoDocument.url, 3600);
-                    } catch (error) {
-                        console.warn('Failed to generate URL for logo document:', error);
-                    }
-                }
+          // 1. Already a presigned URL? Keep it (though rare in your current flow)
+          if (logoUrl.includes('X-Amz-Signature=')) {
+            // good to go
+          }
+          
+          // 2. Plain S3 key → generate presigned (this is the normal case now)
+          else if (!logoUrl.startsWith('http')) {
+            logoUrl = await generatePresignedUrl(logoUrl, 604800); // 7 days
+            if (!logoUrl) logoUrl = null;
+          }
+          
+          // 3. Legacy full direct URL → extract key and regenerate presigned
+          else if (logoUrl.includes('s3.eu-north-1.amazonaws.com')) {
+            try {
+              const urlObj = new URL(logoUrl);
+              let key = urlObj.pathname.slice(1); // remove leading /
+              
+              // In case bucket name is in path (rare with virtual-hosted style)
+              if (key.startsWith('procurement-docss/')) {
+                key = key.replace('procurement-docss/', '');
+              }
+              
+              console.log('Converted legacy URL → key:', key);
+              logoUrl = await generatePresignedUrl(key, 604800);
+              if (!logoUrl) logoUrl = null;
+            } catch (err) {
+              console.error('Failed to convert legacy logo URL:', err);
+              logoUrl = null;
             }
-            // If it's not a blob URL and doesn't start with http, it's likely an S3 key
-            else if (!logoUrl.startsWith('http')) {
-                console.log('📦 Logo appears to be S3 key');
-                try {
-                    logoUrl = await generatePresignedUrl(logoUrl, 3600) || logoUrl;
-                    console.log('✅ Generated presigned URL for logo');
-                } catch (s3Error) {
-                    console.warn('Could not generate presigned URL for logo:', s3Error.message);
-                    // Fallback to public URL
-                    logoUrl = getPublicUrl(logoUrl);
-                }
-            }
-            // If it's already a proper HTTP URL, check it's not a blob URL
-            else if (logoUrl.startsWith('http')) {
-                // Check for blob patterns even in HTTP URLs
-                if (logoUrl.includes('blob%3A') || logoUrl.includes('blob:')) {
-                    console.warn('❌ HTTP URL contains blob pattern, rejecting');
-                    logoUrl = null;
-                } else {
-                    console.log('✅ Logo is already a proper HTTP URL');
-                }
-            }
+          }
+          
+          // 4. Anything else unknown → null it out
+          else {
+            console.warn('Invalid/unknown logo format:', logoUrl);
+            logoUrl = null;
+          }
         }
         
-        console.log('🎯 Final logo URL:', logoUrl);
         
         // 5. Destructure and return the cleaned object WITH LOGO
         const { categories, documents, projectExperience, ...restVendor } = vendor;
@@ -760,7 +749,7 @@ export const updateVendorQualification = async (req, res) => {
                 size: logoFile.size,
                 mimetype: logoFile.mimetype
             });
-
+        
             try {
                 // Upload to AWS S3
                 const s3Key = await uploadToS3(
@@ -771,11 +760,14 @@ export const updateVendorQualification = async (req, res) => {
                     vendor.id
                 );
                 
-                // Generate public URL (or use presigned URL later)
-                const logoUrl = getPublicUrl(s3Key);
-                updateData.logo = logoUrl;
-                console.log('✅ Logo uploaded successfully to S3:', updateData.logo);
-
+                // ✅ IMPORTANT: Store the S3 KEY, not the public URL
+                updateData.logo = s3Key; // Store just the S3 key
+                console.log('✅ Logo uploaded to S3, key stored:', s3Key);
+        
+                // Generate a presigned URL for debugging
+                const presignedUrl = await generatePresignedUrl(s3Key, 604800);
+                console.log('🔗 Presigned URL (valid for 7 days):', presignedUrl);
+        
             } catch (logoError) {
                 console.error('❌ Error processing logo:', logoError);
                 return res.status(500).json({ 
