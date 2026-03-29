@@ -117,7 +117,7 @@ export const getRFQById = async (req, res) => {
           },
         },
         createdBy: { select: { id: true, email: true, name: true } },
-        attachments: true
+        rfqAttachments: true
       },
     });
 
