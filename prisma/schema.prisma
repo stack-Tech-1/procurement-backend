@@ -263,6 +263,10 @@ model User {
   invoicesPending               Invoice[]                    @relation("InvoicePendingWith")
   rfqsPendingWith               RFQ[]                        @relation("RFQPendingWith")
   contractsPendingWith          Contract[]                   @relation("ContractPendingWith")
+  technicalComparisonsCreated   TechnicalComparison[]        @relation("TechCompCreatedBy")
+  financialComparisonsCreated   FinancialComparison[]        @relation("FinCompCreatedBy")
+  evaluationSummariesCreated    EvaluationSummary[]          @relation("EvalCreatedBy")
+  evaluationSummariesApproved   EvaluationSummary[]          @relation("EvalApprovedBy")
 }
 
 model Role {
@@ -335,6 +339,9 @@ model Vendor {
   purchaseOrders            PurchaseOrder[]
   informationRequests       InformationRequest[]
   vendorQualifications      VendorQualification[]
+  technicalComparisons      TechnicalComparison[]
+  financialComparisons      FinancialComparison[]
+  evaluationSummaries       EvaluationSummary[]         @relation("EvalRecommendedVendor")
 
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
@@ -445,6 +452,9 @@ model RFQ {
   submissions          RFQSubmission[]
   rfqAttachments       rfqAttachments[]
   informationRequests  InformationRequest[]
+  technicalComparisons TechnicalComparison[]
+  financialComparisons FinancialComparison[]
+  evaluationSummary    EvaluationSummary?
 }
 
 model RFQSubmission {
@@ -1017,6 +1027,64 @@ model POItem {
   totalPrice      Float
   costCode        String?
   notes           String?
+}
+
+model TechnicalComparison {
+  id                  Int      @id @default(autoincrement())
+  rfqId               Int
+  rfq                 RFQ      @relation(fields: [rfqId], references: [id])
+  vendorId            Int
+  vendor              Vendor   @relation(fields: [vendorId], references: [id])
+  technicalCompliance String   @default("PARTIAL")
+  technicalScore      Int?
+  technicalNotes      String?
+  attachmentPath      String?
+  createdById         Int
+  createdBy           User     @relation("TechCompCreatedBy", fields: [createdById], references: [id])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model FinancialComparison {
+  id                 Int      @id @default(autoincrement())
+  rfqId              Int
+  rfq                RFQ      @relation(fields: [rfqId], references: [id])
+  vendorId           Int
+  vendor             Vendor   @relation(fields: [vendorId], references: [id])
+  currency           String   @default("SAR")
+  unitPrice          Float
+  quantity           Float
+  totalPrice         Float
+  deliveryTimeDays   Int?
+  paymentTerms       String?
+  discount           Float?
+  warrantyPeriod     String?
+  commercialNotes    String?
+  isLowestCommercial Boolean  @default(false)
+  createdById        Int
+  createdBy          User     @relation("FinCompCreatedBy", fields: [createdById], references: [id])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model EvaluationSummary {
+  id                  Int       @id @default(autoincrement())
+  rfqId               Int       @unique
+  rfq                 RFQ       @relation(fields: [rfqId], references: [id])
+  recommendedVendorId Int
+  recommendedVendor   Vendor    @relation("EvalRecommendedVendor", fields: [recommendedVendorId], references: [id])
+  technicalScore      Int?
+  commercialRank      String?
+  awardJustification  String
+  approvalStatus      String    @default("PENDING")
+  approvedById        Int?
+  approvedBy          User?     @relation("EvalApprovedBy", fields: [approvedById], references: [id])
+  approvedAt          DateTime?
+  createdPOId         Int?
+  createdById         Int
+  createdBy           User      @relation("EvalCreatedBy", fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 }
 
 model VendorQualification {
