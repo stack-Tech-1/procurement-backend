@@ -255,7 +255,8 @@ model User {
   signatureRequestsSigned       SignatureRequest[]            @relation("SignatureRequestSigner")
   purchaseRequestsCreated       PurchaseRequest[]            @relation("PRCreatedBy")
   purchaseRequestsPending       PurchaseRequest[]            @relation("PRPendingWith")
-  purchaseOrdersCreated         PurchaseOrder[]              @relation("POCreatedBy")
+  purchaseOrdersIssued          PurchaseOrder[]              @relation("POIssuedBy")
+  purchaseOrdersApproved        PurchaseOrder[]              @relation("POApprovedBy")
   purchaseOrdersPending         PurchaseOrder[]              @relation("POPendingWith")
   vendorQualificationsPending   VendorQualification[]        @relation("VQPendingWith")
   invoicesCreated               Invoice[]                    @relation("InvoiceCreatedBy")
@@ -331,6 +332,7 @@ model Vendor {
   priceEntries              PriceEntry[]
   submissions               RFQSubmission[]
   contracts                 Contract[]
+  purchaseOrders            PurchaseOrder[]
   informationRequests       InformationRequest[]
   vendorQualifications      VendorQualification[]
 
@@ -437,6 +439,7 @@ model RFQ {
   updatedAt            DateTime             @updatedAt
   pendingWithPersonId  Int?
   contracts            Contract[]           @relation("RFQContract")
+  purchaseOrders       PurchaseOrder[]
   createdBy            User                 @relation("UserRFQs", fields: [createdById], references: [id])
   pendingWithPerson    User?                @relation("RFQPendingWith", fields: [pendingWithPersonId], references: [id])
   submissions          RFQSubmission[]
@@ -510,22 +513,24 @@ model VariationOrder {
 }
 
 model IPC {
-  id              Int        @id @default(autoincrement())
-  ipcNumber       String     @unique
+  id              Int            @id @default(autoincrement())
+  ipcNumber       String         @unique
   projectName     String?
   contractId      Int
+  purchaseOrderId Int?
   periodFrom      DateTime?
   periodTo        DateTime?
   currentValue    Float
   cumulativeValue Float?
   deductions      Float?
   netPayable      Float?
-  status          IPCStatus  @default(SUBMITTED)
+  status          IPCStatus      @default(SUBMITTED)
   submittedById   Int
-  createdAt       DateTime   @default(now())
-  contract        Contract   @relation(fields: [contractId], references: [id])
-  submittedBy     User       @relation("UserIPCs", fields: [submittedById], references: [id])
-  attachments     Document[] @relation("IPCAttachments")
+  createdAt       DateTime       @default(now())
+  contract        Contract       @relation(fields: [contractId], references: [id])
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  submittedBy     User           @relation("UserIPCs", fields: [submittedById], references: [id])
+  attachments     Document[]     @relation("IPCAttachments")
 }
 
 model InformationRequest {
@@ -970,20 +975,48 @@ model PurchaseRequest {
 }
 
 model PurchaseOrder {
-  id                  Int       @id @default(autoincrement())
-  poNumber            String    @unique @default(cuid())
-  title               String
-  project             String?
-  status              String    @default("DRAFT")
-  priority            Priority  @default(MEDIUM)
-  dueDate             DateTime?
-  pendingWithPersonId Int?
-  amount              Float?
-  createdById         Int
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  createdBy           User      @relation("POCreatedBy", fields: [createdById], references: [id])
-  pendingWithPerson   User?     @relation("POPendingWith", fields: [pendingWithPersonId], references: [id])
+  id                    Int       @id @default(autoincrement())
+  poNumber              String    @unique
+  projectName           String
+  vendorId              Int
+  vendor                Vendor    @relation(fields: [vendorId], references: [id])
+  rfqId                 Int?
+  rfq                   RFQ?      @relation(fields: [rfqId], references: [id])
+  purchaseRequestId     Int?
+  totalValue            Float
+  currency              String    @default("SAR")
+  status                String    @default("DRAFT")
+  pendingWithDepartment String?
+  pendingWithPersonId   Int?
+  pendingWithPerson     User?     @relation("POPendingWith", fields: [pendingWithPersonId], references: [id])
+  deliveryLocation      String?
+  requiredDate          DateTime?
+  paymentTerms          String?
+  warrantyPeriod        String?
+  notes                 String?
+  issuedById            Int
+  issuedBy              User      @relation("POIssuedBy", fields: [issuedById], references: [id])
+  approvedById          Int?
+  approvedBy            User?     @relation("POApprovedBy", fields: [approvedById], references: [id])
+  approvedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  items                 POItem[]
+  ipcs                  IPC[]
+}
+
+model POItem {
+  id              Int           @id @default(autoincrement())
+  purchaseOrderId Int
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  description     String
+  csiCode         String?
+  quantity        Float
+  unit            String
+  unitPrice       Float
+  totalPrice      Float
+  costCode        String?
+  notes           String?
 }
 
 model VendorQualification {

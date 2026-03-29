@@ -122,23 +122,21 @@ router.get("/charts", async (req, res) => {
       })
     );
 
-    // priorityDistribution: count open items across PR, RFQ, PO, Invoice by priority
+    // priorityDistribution: count open items across PR and Invoice by priority
+    // NOTE: new PurchaseOrder model has no priority field — excluded from priority distribution
     const openStatuses = {
       purchaseRequest: { status: { in: ["SUBMITTED", "UNDER_TECHNICAL_REVIEW", "UNDER_PROCUREMENT_REVIEW", "WAITING_FOR_APPROVAL"] } },
-      purchaseOrder: { status: { notIn: ["APPROVED", "REJECTED", "CANCELLED"] } },
       invoice: { status: { notIn: ["PAID", "REJECTED", "CANCELLED"] } },
     };
 
     const priorities = ["HIGH", "MEDIUM", "LOW"];
     const priorityCounts = await Promise.all(
       priorities.map(async (priority) => {
-        const [pr, po, invoice] = await Promise.all([
+        const [pr, invoice] = await Promise.all([
           prisma.purchaseRequest.count({ where: { ...openStatuses.purchaseRequest, priority } }),
-          prisma.purchaseOrder.count({ where: { ...openStatuses.purchaseOrder, priority } }),
           prisma.invoice.count({ where: { ...openStatuses.invoice, priority } }),
-          // NOTE: RFQ has no priority field — excluded from priority distribution
         ]);
-        return { priority, count: pr + po + invoice };
+        return { priority, count: pr + invoice };
       })
     );
 
@@ -226,7 +224,7 @@ router.get("/approval-queue", async (req, res) => {
             case "PURCHASE_ORDER":
               entity = await prisma.purchaseOrder.findUnique({
                 where: { id: entityId },
-                select: { title: true, project: true, createdAt: true, status: true, priority: true },
+                select: { poNumber: true, projectName: true, createdAt: true, status: true },
               });
               break;
             case "VENDOR_QUALIFICATION":
@@ -249,7 +247,7 @@ router.get("/approval-queue", async (req, res) => {
         return {
           id: action.id,
           type: entityType,
-          details: entity?.title ?? entity?.contractNumber ?? `${entityType} #${entityId}`,
+          details: entity?.title ?? entity?.poNumber ?? entity?.contractNumber ?? `${entityType} #${entityId}`,
           project: entity?.projectName ?? entity?.project ?? null,
           requestedDate: entity?.createdAt ?? action.createdAt,
           priority: entity?.priority ?? "MEDIUM",
@@ -285,8 +283,8 @@ router.get("/critical-deadlines", async (req, res) => {
         orderBy: { dueDate: "asc" },
       }),
       prisma.purchaseOrder.findMany({
-        where: { dueDate: deadlineFilter, status: { notIn: ["APPROVED", "REJECTED", "CANCELLED"] } },
-        orderBy: { dueDate: "asc" },
+        where: { requiredDate: deadlineFilter, status: { notIn: ["APPROVED", "REJECTED", "CANCELLED", "CLOSED"] } },
+        orderBy: { requiredDate: "asc" },
       }),
       prisma.rFQ.findMany({
         where: { dueDate: deadlineFilter, status: { in: ["DRAFT", "ISSUED", "OPEN"] } },
@@ -325,13 +323,13 @@ router.get("/critical-deadlines", async (req, res) => {
       })),
       ...pos.map((p) => ({
         id: p.id,
-        task: p.title,
+        task: p.poNumber,
         module: "Purchase Order",
-        project: p.project,
+        project: p.projectName,
         assignedTo: null,
-        dueDate: p.dueDate,
-        daysUntilDue: daysUntilDue(p.dueDate),
-        priority: p.priority,
+        dueDate: p.requiredDate,
+        daysUntilDue: p.requiredDate ? daysUntilDue(p.requiredDate) : null,
+        priority: "MEDIUM",
         status: p.status,
       })),
       ...rfqs.map((r) => ({

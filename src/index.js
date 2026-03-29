@@ -39,6 +39,7 @@ import informationRequestRoutes from './routes/informationRequestRoutes.js';
 import vendorSubmissionsRouter from './routes/vendor/submissions.js';
 import brandingAdminRouter, { publicBrandingRouter } from './routes/admin/branding.js';
 import managerDashboardRouter from './routes/dashboard/manager.js';
+import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 
 dotenv.config();
 const app = express();
@@ -87,6 +88,7 @@ app.use('/api/vendor/submissions', vendorSubmissionsRouter);
 app.use('/api/admin/branding', brandingAdminRouter);
 app.use('/api/branding', publicBrandingRouter);
 app.use('/api/dashboard/manager', authenticateToken, managerDashboardRouter);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
 
 
 
