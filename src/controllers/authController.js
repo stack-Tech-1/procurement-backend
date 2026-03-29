@@ -2,6 +2,31 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prismaClient.js";
 
+const VALID_VENDOR_TYPES = ["Contractor", "Supplier", "Manufacturer", "Distributor", "Service Provider", "Consultant", "Subcontractor"];
+const VALID_DEPARTMENTS = ["Procurement", "Contracts", "Finance", "Technical", "Admin"];
+
+function validatePasswordStrength(password) {
+  if (password.length < 8) return false;
+  if (!/[A-Z]/.test(password)) return false;
+  if (!/[a-z]/.test(password)) return false;
+  if (!/[0-9]/.test(password)) return false;
+  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return false;
+  return true;
+}
+
+async function verifyRecaptcha(token) {
+  const params = new URLSearchParams();
+  params.append("secret", process.env.RECAPTCHA_SECRET_KEY);
+  params.append("response", token);
+
+  const response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+    method: "POST",
+    body: params,
+  });
+  const data = await response.json();
+  return data.success === true && (data.score === undefined || data.score >= 0.5);
+}
+
 const REGISTRATION_TOKENS = {
   EXECUTIVE: process.env.EXECUTIVE_REGISTRATION_TOKEN,
   PROCUREMENT_MANAGER: process.env.PROCUREMENT_MANAGER_TOKEN,
@@ -16,15 +41,27 @@ const REGISTRATION_TOKENS = {
 export const register = async (req, res) => {
   try {
     console.log("Incoming registration request:", req.body);
-    const { name, email, password, accessCode, vendorType, department, jobTitle } = req.body;
+    const { name, email, password, accessCode, vendorType, companyName, crNumber, employeeId, department, jobTitle, captchaToken } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required." });
     }
 
+    if (!validatePasswordStrength(password)) {
+      return res.status(400).json({ error: "Password does not meet requirements. Must be at least 8 characters with uppercase, lowercase, number, and special character." });
+    }
+
+    if (!captchaToken) {
+      return res.status(400).json({ error: "CAPTCHA verification failed. Please try again." });
+    }
+    const captchaPassed = await verifyRecaptcha(captchaToken);
+    if (!captchaPassed) {
+      return res.status(400).json({ error: "CAPTCHA verification failed. Please try again." });
+    }
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return res.status(400).json({ error: "Email already registered." });
+      return res.status(409).json({ error: "This email is already registered. Please login instead." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -54,6 +91,32 @@ export const register = async (req, res) => {
       return res.status(400).json({ error: "Invalid access code." });
     }
 
+    // Vendor-specific validation
+    if (roleId === 4) {
+      if (!companyName || !companyName.trim()) {
+        return res.status(400).json({ error: "Company name is required for vendor registration." });
+      }
+      if (!crNumber || !crNumber.trim()) {
+        return res.status(400).json({ error: "CR number is required for vendor registration." });
+      }
+      if (!vendorType || !VALID_VENDOR_TYPES.includes(vendorType)) {
+        return res.status(400).json({ error: `Vendor type must be one of: ${VALID_VENDOR_TYPES.join(", ")}.` });
+      }
+    }
+
+    // Staff-specific validation
+    if (roleId !== 4) {
+      if (!employeeId || !employeeId.trim()) {
+        return res.status(400).json({ error: "Employee ID is required for staff registration." });
+      }
+      if (!jobTitle || !jobTitle.trim()) {
+        return res.status(400).json({ error: "Job title is required for staff registration." });
+      }
+      if (!department || !VALID_DEPARTMENTS.includes(department)) {
+        return res.status(400).json({ error: `Department must be one of: ${VALID_DEPARTMENTS.join(", ")}.` });
+      }
+    }
+
     // Create user with additional fields
     const user = await prisma.user.create({
       data: { 
@@ -71,9 +134,10 @@ export const register = async (req, res) => {
     if (roleId === 4) {
       const vendor = await prisma.vendor.create({
         data: {
-          companyLegalName: name || "Unnamed Vendor",
+          companyLegalName: companyName.trim(),
           contactEmail: email,
-          vendorType: vendorType || "Goods",
+          vendorType: vendorType,
+          crNumber: crNumber.trim(),
           status: "NEW",
           user: { connect: { id: user.id } },
         },

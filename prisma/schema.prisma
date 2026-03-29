@@ -253,6 +253,15 @@ model User {
   notifications                 Notification[]                @relation("UserNotifications")
   signatureRequestsCreated      SignatureRequest[]            @relation("SignatureRequestRequester")
   signatureRequestsSigned       SignatureRequest[]            @relation("SignatureRequestSigner")
+  purchaseRequestsCreated       PurchaseRequest[]            @relation("PRCreatedBy")
+  purchaseRequestsPending       PurchaseRequest[]            @relation("PRPendingWith")
+  purchaseOrdersCreated         PurchaseOrder[]              @relation("POCreatedBy")
+  purchaseOrdersPending         PurchaseOrder[]              @relation("POPendingWith")
+  vendorQualificationsPending   VendorQualification[]        @relation("VQPendingWith")
+  invoicesCreated               Invoice[]                    @relation("InvoiceCreatedBy")
+  invoicesPending               Invoice[]                    @relation("InvoicePendingWith")
+  rfqsPendingWith               RFQ[]                        @relation("RFQPendingWith")
+  contractsPendingWith          Contract[]                   @relation("ContractPendingWith")
 }
 
 model Role {
@@ -323,6 +332,7 @@ model Vendor {
   submissions               RFQSubmission[]
   contracts                 Contract[]
   informationRequests       InformationRequest[]
+  vendorQualifications      VendorQualification[]
 
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
@@ -425,8 +435,10 @@ model RFQ {
   dueDate              DateTime?
   title                String
   updatedAt            DateTime             @updatedAt
+  pendingWithPersonId  Int?
   contracts            Contract[]           @relation("RFQContract")
   createdBy            User                 @relation("UserRFQs", fields: [createdById], references: [id])
+  pendingWithPerson    User?                @relation("RFQPendingWith", fields: [pendingWithPersonId], references: [id])
   submissions          RFQSubmission[]
   rfqAttachments       rfqAttachments[]
   informationRequests  InformationRequest[]
@@ -475,8 +487,10 @@ model Contract {
   endDate         DateTime?
   status          String?
   createdAt       DateTime         @default(now())
+  pendingWithPersonId Int?
   rfq             RFQ?             @relation("RFQContract", fields: [rfqId], references: [id])
   vendor          Vendor           @relation(fields: [vendorId], references: [id])
+  pendingWithPerson User?          @relation("ContractPendingWith", fields: [pendingWithPersonId], references: [id])
   ipcs            IPC[]
   variationOrders VariationOrder[]
   documents       Document[]       @relation("ContractDocuments")
@@ -935,4 +949,86 @@ model rfqAttachments {
   @@unique([A, B], map: "_rfqAttachments_AB_unique")
   @@index([B], map: "_rfqAttachments_B_index")
   @@map("_rfqAttachments")
+}
+
+model PurchaseRequest {
+  id                  Int       @id @default(autoincrement())
+  prNumber            String    @unique @default(cuid())
+  title               String
+  description         String?
+  project             String?
+  status              String    @default("SUBMITTED")
+  priority            Priority  @default(MEDIUM)
+  dueDate             DateTime?
+  pendingWithPersonId Int?
+  createdById         Int
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdBy           User      @relation("PRCreatedBy", fields: [createdById], references: [id])
+  pendingWithPerson   User?     @relation("PRPendingWith", fields: [pendingWithPersonId], references: [id])
+}
+
+model PurchaseOrder {
+  id                  Int       @id @default(autoincrement())
+  poNumber            String    @unique @default(cuid())
+  title               String
+  project             String?
+  status              String    @default("DRAFT")
+  priority            Priority  @default(MEDIUM)
+  dueDate             DateTime?
+  pendingWithPersonId Int?
+  amount              Float?
+  createdById         Int
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdBy           User      @relation("POCreatedBy", fields: [createdById], references: [id])
+  pendingWithPerson   User?     @relation("POPendingWith", fields: [pendingWithPersonId], references: [id])
+}
+
+model VendorQualification {
+  id                  Int       @id @default(autoincrement())
+  vendorId            Int
+  status              String    @default("SUBMITTED")
+  priority            Priority  @default(MEDIUM)
+  pendingWithPersonId Int?
+  notes               String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  vendor              Vendor    @relation(fields: [vendorId], references: [id])
+  pendingWithPerson   User?     @relation("VQPendingWith", fields: [pendingWithPersonId], references: [id])
+}
+
+model Invoice {
+  id                  Int       @id @default(autoincrement())
+  invoiceNumber       String    @unique @default(cuid())
+  title               String?
+  project             String?
+  amount              Float     @default(0)
+  status              String    @default("DRAFT")
+  priority            Priority  @default(MEDIUM)
+  dueDate             DateTime?
+  pendingWithPersonId Int?
+  createdById         Int
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdBy           User      @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+  pendingWithPerson   User?     @relation("InvoicePendingWith", fields: [pendingWithPersonId], references: [id])
+}
+
+model BrandingSettings {
+  id              Int      @id @default(autoincrement())
+  companyName     String   @default("KUN Real Estate")
+  tagline         String   @default("Building excellence through trusted partnerships.")
+  aboutText       String   @default("We are a leading developer and investment group in Saudi Arabia.")
+  learnMoreUrl    String   @default("")
+  primaryColor    String   @default("#0A1628")
+  accentColor     String   @default("#B8960A")
+  logoUrl         String   @default("")
+  faviconUrl      String   @default("")
+  backgroundImage String   @default("")
+  statProjects    Int      @default(0)
+  statPartners    Int      @default(0)
+  statYears       Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  updatedById     Int?
 }

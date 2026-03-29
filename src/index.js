@@ -37,12 +37,14 @@ import analyticsRoutes from './routes/analytics.js';
 import budgetRoutes from './routes/budgetRoutes.js';
 import informationRequestRoutes from './routes/informationRequestRoutes.js';
 import vendorSubmissionsRouter from './routes/vendor/submissions.js';
+import brandingAdminRouter, { publicBrandingRouter } from './routes/admin/branding.js';
+import managerDashboardRouter from './routes/dashboard/manager.js';
 
 dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: ["https://main.dwotf13xzdq3t.amplifyapp.com", "https://main.d3bob118rkl74z.amplifyapp.com"], // your frontend's dev URL
+  origin: ["https://main.dwotf13xzdq3t.amplifyapp.com", "https://main.d3bob118rkl74z.amplifyapp.com", "http://localhost:3000"], // your frontend's dev URL
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
@@ -50,6 +52,7 @@ app.use(cors({
 
 
 app.use(express.json());
+app.use('/uploads', express.static('uploads'));
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -81,6 +84,9 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/budget', budgetRoutes);
 app.use('/api/information-requests', informationRequestRoutes);
 app.use('/api/vendor/submissions', vendorSubmissionsRouter);
+app.use('/api/admin/branding', brandingAdminRouter);
+app.use('/api/branding', publicBrandingRouter);
+app.use('/api/dashboard/manager', authenticateToken, managerDashboardRouter);
 
 
 
