@@ -20,18 +20,19 @@ function calcTrend(current, previous) {
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Count records where pendingWithPersonId = userId AND status = 'WAITING_FOR_APPROVAL'
-// across all 6 tables, for a given date range (optional)
+// across tables that support a plain-string status field, for a given date range (optional).
+// NOTE: RFQ.status is an enum (RFQStatus: DRAFT/ISSUED/OPEN/CLOSED/AWARDED/CANCELED) —
+// it does NOT include WAITING_FOR_APPROVAL, so RFQ is excluded to avoid a Prisma enum error.
 async function countPendingApprovals(userId, dateFilter = {}) {
   const where = { pendingWithPersonId: userId, status: "WAITING_FOR_APPROVAL", ...dateFilter };
-  const [pr, rfq, po, contract, vq, invoice] = await Promise.all([
+  const [pr, po, contract, vq, invoice] = await Promise.all([
     prisma.purchaseRequest.count({ where }),
-    prisma.rFQ.count({ where }),
     prisma.purchaseOrder.count({ where }),
     prisma.contract.count({ where }),
     prisma.vendorQualification.count({ where }),
     prisma.invoice.count({ where }),
   ]);
-  return pr + rfq + po + contract + vq + invoice;
+  return pr + po + contract + vq + invoice;
 }
 
 // ─── GET /api/dashboard/manager/kpis ─────────────────────────────────────────
@@ -119,7 +120,6 @@ router.get("/charts", async (req, res) => {
     // priorityDistribution: count open items across PR, RFQ, PO, Invoice by priority
     const openStatuses = {
       purchaseRequest: { status: { in: ["SUBMITTED", "UNDER_TECHNICAL_REVIEW", "UNDER_PROCUREMENT_REVIEW", "WAITING_FOR_APPROVAL"] } },
-      rFQ: { status: { in: ["DRAFT", "ISSUED", "OPEN"] } },
       purchaseOrder: { status: { notIn: ["APPROVED", "REJECTED", "CANCELLED"] } },
       invoice: { status: { notIn: ["PAID", "REJECTED", "CANCELLED"] } },
     };
@@ -127,11 +127,11 @@ router.get("/charts", async (req, res) => {
     const priorities = ["HIGH", "MEDIUM", "LOW"];
     const priorityCounts = await Promise.all(
       priorities.map(async (priority) => {
-        const [pr, rfq, po, invoice] = await Promise.all([
+        const [pr, po, invoice] = await Promise.all([
           prisma.purchaseRequest.count({ where: { ...openStatuses.purchaseRequest, priority } }),
-          prisma.rFQ.count({ where: {} }), // RFQ has no priority field — count as 0 split
           prisma.purchaseOrder.count({ where: { ...openStatuses.purchaseOrder, priority } }),
           prisma.invoice.count({ where: { ...openStatuses.invoice, priority } }),
+          // NOTE: RFQ has no priority field — excluded from priority distribution
         ]);
         return { priority, count: pr + po + invoice };
       })
