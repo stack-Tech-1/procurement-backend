@@ -43,14 +43,8 @@ router.get("/kpis", async (req, res) => {
     const now = new Date();
     const { start: lastMonthStart, end: lastMonthEnd } = monthRange(1);
 
-    const [
-      openPRs,
-      openPRsLastMonth,
-      overdueTasks,
-      overdueTasksLastMonth,
-      vendorsUnderReview,
-      vendorsUnderReviewLastMonth,
-    ] = await Promise.all([
+    // openPRs — PurchaseRequest.status is a plain String field
+    const [openPRs, openPRsLastMonth] = await Promise.all([
       prisma.purchaseRequest.count({
         where: { status: { in: ["SUBMITTED", "UNDER_TECHNICAL_REVIEW", "UNDER_PROCUREMENT_REVIEW"] } },
       }),
@@ -60,8 +54,15 @@ router.get("/kpis", async (req, res) => {
           createdAt: { gte: lastMonthStart, lte: lastMonthEnd },
         },
       }),
+    ]);
+
+    // overdueTasks — Task.status is the TaskStatus enum; pass enum member names as strings
+    const [overdueTasks, overdueTasksLastMonth] = await Promise.all([
       prisma.task.count({
-        where: { dueDate: { lt: now }, status: { notIn: ["COMPLETED", "CANCELLED"] } },
+        where: {
+          dueDate: { lt: now },
+          status: { notIn: ["COMPLETED", "CANCELLED"] },
+        },
       }),
       prisma.task.count({
         where: {
@@ -70,11 +71,15 @@ router.get("/kpis", async (req, res) => {
           status: { notIn: ["COMPLETED", "CANCELLED"] },
         },
       }),
+    ]);
+
+    // vendorsUnderReview — Vendor.status is the VendorStatus enum
+    const [vendorsUnderReview, vendorsUnderReviewLastMonth] = await Promise.all([
       prisma.vendor.count({ where: { status: "UNDER_REVIEW" } }),
-      // Vendors under review has no time filter — approximate last month as current
       prisma.vendor.count({ where: { status: "UNDER_REVIEW", updatedAt: { lte: lastMonthEnd } } }),
     ]);
 
+    // pendingApprovals — across PR, PO, Contract, VendorQualification, Invoice (all have String status)
     const [pendingApprovals, pendingApprovalsLastMonth] = await Promise.all([
       countPendingApprovals(userId),
       countPendingApprovals(userId, { updatedAt: { gte: lastMonthStart, lte: lastMonthEnd } }),
@@ -91,8 +96,8 @@ router.get("/kpis", async (req, res) => {
       trendVendorsUnderReview: calcTrend(vendorsUnderReview, vendorsUnderReviewLastMonth),
     });
   } catch (error) {
-    console.error("❌ Error fetching manager KPIs:", error);
-    res.status(500).json({ error: "Failed to fetch KPIs." });
+    console.error("❌ FULL KPI ERROR:", error);
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
 
