@@ -487,6 +487,7 @@ model Contract {
   endDate         DateTime?
   status          String?
   createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   pendingWithPersonId Int?
   rfq             RFQ?             @relation("RFQContract", fields: [rfqId], references: [id])
   vendor          Vendor           @relation(fields: [vendorId], references: [id])
