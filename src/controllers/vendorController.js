@@ -1,5 +1,5 @@
 import prisma from "../config/prismaClient.js";
-import { generatePresignedUrl, getPublicUrl } from '../lib/awsS3.js';
+import { generatePresignedUrl, getPublicUrl, uploadToS3 } from '../lib/awsS3.js';
 import path from 'path';
 
 /**
@@ -89,11 +89,18 @@ export const getVendorDetails = async (req, res) => {
             })
         );
 
-        // 4. Destructure and return the cleaned object
+        // 4. Presign logo URL if it's an S3 key
+        let logoUrl = vendor.logo;
+        if (logoUrl && !logoUrl.startsWith('http')) {
+            logoUrl = await generatePresignedUrl(logoUrl, 604800) || null;
+        }
+
+        // 5. Destructure and return the cleaned object
         const { categories, documents, projectExperience, ...restVendor } = vendor;
 
-        res.json({ 
+        res.json({
             ...restVendor,
+            logo: logoUrl,
             documents: documentsWithUrls,
             projectExperience: projectsWithUrls,
             categories: simplifiedCategories,
@@ -645,8 +652,6 @@ export const getFilteredVendorList = async (req, res) => {
     }
 };
 
-// Import AWS S3 upload function
-import { uploadToS3 } from '../lib/awsS3.js';
 
 /**
  * Update Vendor Qualification (Vendor self-update)
@@ -929,10 +934,100 @@ export const getAllCategories = async (req, res) => {
         const categories = await prisma.category.findMany({
             orderBy: { name: 'asc' }
         });
-        
+
         res.json(categories);
     } catch (error) {
         console.error('Error fetching categories:', error);
         res.status(500).json({ error: 'Failed to fetch categories' });
+    }
+};
+
+/**
+ * Upload or replace a vendor document
+ * PUT /api/vendors/:id/documents/:docType
+ */
+export const uploadVendorDocument = async (req, res) => {
+    const vendorId = parseInt(req.params.id);
+    const { docType } = req.params;
+    const file = req.file;
+
+    if (isNaN(vendorId)) return res.status(400).json({ error: 'Invalid vendor ID' });
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+    try {
+        const s3Key = await uploadToS3(file.buffer, file.originalname, file.mimetype, 'vendor-documents', vendorId);
+        const fileUrl = getPublicUrl(s3Key);
+
+        const existing = await prisma.vendorDocument.findFirst({
+            where: { vendorId, docType },
+        });
+
+        let document;
+        const expiryDate = req.body.expiryDate ? new Date(req.body.expiryDate) : undefined;
+
+        if (existing) {
+            document = await prisma.vendorDocument.update({
+                where: { id: existing.id },
+                data: {
+                    url: fileUrl,
+                    fileName: file.originalname,
+                    uploadedAt: new Date(),
+                    isVerified: false,
+                    verifiedBy: null,
+                    verificationDate: null,
+                    ...(expiryDate !== undefined && { expiryDate }),
+                },
+            });
+        } else {
+            document = await prisma.vendorDocument.create({
+                data: {
+                    vendorId,
+                    docType,
+                    url: fileUrl,
+                    fileName: file.originalname,
+                    ...(expiryDate !== undefined && { expiryDate }),
+                },
+            });
+        }
+
+        res.json(document);
+    } catch (error) {
+        console.error('Error uploading vendor document:', error);
+        res.status(500).json({ error: 'Failed to upload document' });
+    }
+};
+
+/**
+ * Verify or unverify a vendor document
+ * PATCH /api/vendors/:id/documents/:docType/verify
+ */
+export const verifyVendorDocument = async (req, res) => {
+    const vendorId = parseInt(req.params.id);
+    const { docType } = req.params;
+    const { verified } = req.body;
+
+    if (isNaN(vendorId)) return res.status(400).json({ error: 'Invalid vendor ID' });
+    if (verified === undefined) return res.status(400).json({ error: 'verified field is required' });
+
+    try {
+        const existing = await prisma.vendorDocument.findFirst({
+            where: { vendorId, docType },
+        });
+
+        if (!existing) return res.status(404).json({ error: 'Document not found' });
+
+        const document = await prisma.vendorDocument.update({
+            where: { id: existing.id },
+            data: {
+                isVerified: Boolean(verified),
+                verifiedBy: verified ? (req.user?.name || req.user?.email || 'Unknown') : null,
+                verificationDate: verified ? new Date() : null,
+            },
+        });
+
+        res.json(document);
+    } catch (error) {
+        console.error('Error verifying vendor document:', error);
+        res.status(500).json({ error: 'Failed to verify document' });
     }
 };

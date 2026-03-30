@@ -359,6 +359,9 @@ model VendorDocument {
   gosiNumber      String?
   isoType         String?
   isValid         Boolean             @default(true)
+  isVerified      Boolean             @default(false)
+  verifiedBy      String?
+  verificationDate DateTime?
   uploadedAt      DateTime            @default(now())
 
   vendor          Vendor              @relation(fields: [vendorId], references: [id])

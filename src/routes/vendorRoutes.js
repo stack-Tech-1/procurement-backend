@@ -1,17 +1,20 @@
 import express from "express";
 import {
   createVendor,
-  getVendor,  
+  getVendor,
   getAllVendors,
-  getVendorStats,  
+  getVendorStats,
   adminUpdateVendor,
   getVendorDetails,
   getMyQualificationDetails,
   getFilteredVendorList,
-  updateVendorQualification
+  updateVendorQualification,
+  uploadVendorDocument,
+  verifyVendorDocument,
 } from "../controllers/vendorController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
-import upload from "../middleware/uploadMiddleware.js"; // ADD THIS IMPORT
+import { authorizeRole } from "../middleware/roleMiddleware.js";
+import upload from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
@@ -56,6 +59,10 @@ router.put(
   ]), 
   updateVendorQualification
 );
+
+// Document upload and verification (must be before generic /:id routes)
+router.put('/:id/documents/:docType', authenticateToken, authorizeRole([1, 2, 3]), upload.single('file'), uploadVendorDocument);
+router.patch('/:id/documents/:docType/verify', authenticateToken, authorizeRole([1, 2, 3]), verifyVendorDocument);
 
 router.put("/:id", authenticateToken, adminUpdateVendor);
 router.get('/:id', authenticateToken, getVendorDetails);
