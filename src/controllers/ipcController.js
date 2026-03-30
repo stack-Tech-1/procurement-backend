@@ -1,5 +1,6 @@
 // backend/src/controllers/ipcController.js
 import prisma from "../config/prismaClient.js";
+import { notificationService } from '../services/notificationService.js';
 
 /**
  * Create IPC
@@ -206,6 +207,25 @@ export const updateIPCStatus = async (req, res) => {
         submittedBy: { select: { id: true, name: true, email: true } }
       }
     });
+
+    // Notify the vendor/submitter
+    try {
+      if (updated.submittedBy?.id) {
+        await notificationService.createNotification({
+          userId: updated.submittedBy.id,
+          title: `IPC ${updated.ipcNumber || id} Status Updated`,
+          body: `Your IPC for ${updated.projectName || 'project'} is now ${status}. ${reviewNotes || ''}`.trim(),
+          type: ['APPROVED', 'PAID'].includes(status) ? 'INFO' : 'WARNING',
+          priority: 'HIGH',
+          actionUrl: '/dashboard/vendor/ipc',
+          module: 'IPC',
+          entityId: updated.id,
+          entityType: 'IPC'
+        });
+      }
+    } catch (notifErr) {
+      console.error('Failed to send IPC notification:', notifErr.message);
+    }
 
     res.json(updated);
   } catch (error) {

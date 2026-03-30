@@ -2,6 +2,7 @@
 import prisma from '../config/prismaClient.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { emailService } from '../services/emailService.js';
+import { notificationService } from '../services/notificationService.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -376,6 +377,50 @@ export const updatePOStatus = async (req, res) => {
         console.error('Failed to send PO issue email:', emailError);
         // Non-fatal — status already updated
       }
+    }
+
+    // In-app notifications
+    try {
+      if (newStatus === 'PENDING_APPROVAL') {
+        // Notify all managers
+        const managers = await prisma.user.findMany({ where: { roleId: 2, isActive: true }, select: { id: true } });
+        for (const m of managers) {
+          await notificationService.createNotification({
+            userId: m.id,
+            title: `PO Pending Approval: ${po.poNumber}`,
+            body: `${po.projectName || po.poNumber} — ${(po.totalValue || 0).toLocaleString()} ${po.currency || 'SAR'}`,
+            type: 'INFO',
+            priority: 'HIGH',
+            actionUrl: '/dashboard/manager/approvals',
+            module: 'PURCHASE_ORDER',
+            entityId: po.id,
+            entityType: 'PurchaseOrder'
+          });
+        }
+      }
+
+      if (newStatus === 'ISSUED') {
+        // Look up vendor user id
+        const vendorRecord = await prisma.vendor.findFirst({
+          where: { companyLegalName: po.vendor?.companyLegalName },
+          select: { id: true, userId: true }
+        });
+        if (vendorRecord?.userId) {
+          await notificationService.createNotification({
+            userId: vendorRecord.userId,
+            title: `Purchase Order Issued: ${po.poNumber}`,
+            body: `PO for ${po.projectName || po.poNumber} has been issued to your company.`,
+            type: 'INFO',
+            priority: 'HIGH',
+            actionUrl: '/dashboard/vendor/purchase-orders',
+            module: 'PURCHASE_ORDER',
+            entityId: po.id,
+            entityType: 'PurchaseOrder'
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.error('Failed to send PO notification:', notifErr.message);
     }
 
     res.json(updated);

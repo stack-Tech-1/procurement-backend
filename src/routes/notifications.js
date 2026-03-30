@@ -11,6 +11,9 @@ router.get('/', authenticateToken, notificationController.getUserNotifications);
 // Get notification statistics
 router.get('/stats', authenticateToken, notificationController.getNotificationStats);
 
+// Fast unread count (registered before /:notificationId to avoid param conflict)
+router.get('/unread-count', authenticateToken, notificationController.getUnreadCount);
+
 // Mark notification as read
 router.patch('/:notificationId/read', authenticateToken, notificationController.markAsRead);
 
@@ -20,5 +23,8 @@ router.patch('/read-all', authenticateToken, notificationController.markAllAsRea
 // Manual triggers for testing (Admin only)
 router.post('/alerts/document-expiry', authenticateToken, notificationController.triggerDocumentExpiryAlerts);
 router.post('/alerts/pending-approvals', authenticateToken, notificationController.triggerPendingApprovalAlerts);
+
+// Delete own notification
+router.delete('/:notificationId', authenticateToken, notificationController.deleteNotification);
 
 export default router;

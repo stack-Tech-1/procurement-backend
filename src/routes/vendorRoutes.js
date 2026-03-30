@@ -15,6 +15,7 @@ import {
   runAIEvaluation,
   submitEngineerReview,
   adminAction,
+  getDocumentAlerts,
 } from "../controllers/vendorController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { authorizeRole } from "../middleware/roleMiddleware.js";
@@ -66,6 +67,9 @@ router.put(
 
 // CR number duplicate check (before /:id to avoid param conflict)
 router.get('/check-cr', authenticateToken, checkCrNumber);
+
+// Document expiry alerts for managers/officers (before /:id to avoid param conflict)
+router.get('/document-alerts', authenticateToken, authorizeRole([1, 2, 3]), getDocumentAlerts);
 
 // Document upload and verification (must be before generic /:id routes)
 router.put('/:id/documents/:docType', authenticateToken, authorizeRole([1, 2, 3]), upload.single('file'), uploadVendorDocument);

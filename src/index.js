@@ -18,9 +18,12 @@ import adminSubmissionsRouter from './routes/admin/submissions.js';
 import adminFilesRouter from './routes/admin/files.js';
 import qualificationRoutes from './routes/qualification.routes.js';
 import vendorManagementRoute from "./routes/vendor/management.js";
+import cron from 'node-cron';
 import { startExpiryCheckJob } from "./jobs/expiryCheckJob.js";
 import { runTaskEscalationJob } from "./jobs/taskEscalationJob.js";
 import { runDailySummaryJob } from "./jobs/dailySummaryJob.js";
+import { runDocumentExpiryJob } from "./jobs/documentExpiryJob.js";
+import { runWeeklyReportJob } from "./jobs/weeklyReportJob.js";
 import categoryRoutes from './routes/categoryRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import submissionRoutes from "./routes/submissionRoutes.js";
@@ -141,6 +144,18 @@ app.listen(PORT, async () => {
 
     // Daily summary: scheduler cron handles timing; also check every 30 min
     setInterval(runDailySummaryJob, 30 * 60 * 1000);
+
+    // Document expiry job: daily at 8 AM (also runs on startup for immediate alerts)
+    cron.schedule(process.env.CRON_DOCUMENT_EXPIRY || '0 8 * * *', () => {
+      console.log('[Cron] Running document expiry job...');
+      runDocumentExpiryJob();
+    });
+
+    // Weekly report: every Monday at 8 AM
+    cron.schedule(process.env.CRON_WEEKLY_REPORT || '0 8 * * 1', () => {
+      console.log('[Cron] Running weekly report job...');
+      runWeeklyReportJob();
+    });
 
     console.log('✅ Background jobs started');
     

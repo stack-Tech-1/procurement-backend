@@ -1,6 +1,7 @@
 // backend/src/controllers/submissionController.js
 import prisma from "../config/prismaClient.js";
 import { uploadToS3, generatePresignedUrl } from "../lib/awsS3.js";
+import { notificationService } from '../services/notificationService.js';
 
 /**
  * Create Vendor Submission for RFQ
@@ -123,6 +124,26 @@ export const createSubmission = async (req, res) => {
     // 7. Generate signed URL for the document if stored as S3 key
     if (submission.docUrl && !submission.docUrl.startsWith('http')) {
       submission.docUrl = await generatePresignedUrl(submission.docUrl, 3600);
+    }
+
+    // 8. Notify procurement staff of new submission
+    try {
+      const staff = await prisma.user.findMany({ where: { roleId: { in: [2, 3] }, isActive: true }, select: { id: true } });
+      for (const s of staff) {
+        await notificationService.createNotification({
+          userId: s.id,
+          title: `New RFQ Submission: ${submission.rfq?.rfqNumber || rfqId}`,
+          body: `${submission.vendor?.companyLegalName} submitted a proposal for ${submission.rfq?.projectName || submission.rfq?.title || 'RFQ'}`,
+          type: 'INFO',
+          priority: 'MEDIUM',
+          actionUrl: `/dashboard/procurement/rfq/${rfqId}`,
+          module: 'SUBMISSION',
+          entityId: submission.id,
+          entityType: 'RFQSubmission'
+        });
+      }
+    } catch (notifErr) {
+      console.error('Failed to send submission notification:', notifErr.message);
     }
 
     res.status(201).json({

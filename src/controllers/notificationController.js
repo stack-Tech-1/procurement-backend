@@ -1,5 +1,6 @@
 // backend/src/controllers/notificationController.js
 import { notificationService } from '../services/notificationService.js';
+import prisma from '../config/prismaClient.js';
 
 export const notificationController = {
 
@@ -120,6 +121,34 @@ export const notificationController = {
         success: false,
         message: 'Failed to trigger pending approval alerts'
       });
+    }
+  },
+
+  // Fast unread count — called every 30s by frontend
+  async getUnreadCount(req, res) {
+    try {
+      const { userId } = req.user;
+      const count = await prisma.notification.count({ where: { userId, read: false } });
+      res.json({ success: true, count });
+    } catch (error) {
+      console.error('Error getting unread count:', error);
+      res.status(500).json({ success: false, message: 'Failed to get unread count' });
+    }
+  },
+
+  // Delete own notification
+  async deleteNotification(req, res) {
+    try {
+      const { userId } = req.user;
+      const id = parseInt(req.params.notificationId);
+      const notif = await prisma.notification.findUnique({ where: { id } });
+      if (!notif) return res.status(404).json({ success: false, message: 'Not found' });
+      if (notif.userId !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+      await prisma.notification.delete({ where: { id } });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      res.status(500).json({ success: false, message: 'Failed to delete notification' });
     }
   }
 };

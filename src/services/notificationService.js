@@ -33,6 +33,9 @@ export const notificationService = {
               type: notificationData.type || 'INFO',
               priority: notificationData.priority || 'MEDIUM',
               actionUrl: notificationData.actionUrl,
+              module: notificationData.module || null,
+              entityId: notificationData.entityId || null,
+              entityType: notificationData.entityType || null,
               metadata: notificationData.metadata
             },
             include: {

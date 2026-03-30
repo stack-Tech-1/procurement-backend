@@ -1,6 +1,9 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prismaClient.js";
+import { notificationService } from '../services/notificationService.js';
+import { emailService } from '../services/emailService.js';
+import { accountActivatedTemplate } from '../services/emailTemplates.js';
 
 const VALID_VENDOR_TYPES = ["Contractor", "Supplier", "Manufacturer", "Distributor", "Service Provider", "Consultant", "Subcontractor"];
 const VALID_DEPARTMENTS = ["Procurement", "Contracts", "Finance", "Technical", "Admin"];
@@ -272,6 +275,31 @@ export const approveUser = async (req, res) => {
       where: { id: parseInt(id) },
       data: { status: "ACTIVE" },
     });
+
+    // Notify and email the approved user
+    try {
+      await notificationService.createNotification({
+        userId: approvedUser.id,
+        title: 'Account Activated',
+        body: 'Your procurement system account has been approved and is now active. You can now log in.',
+        type: 'INFO',
+        priority: 'HIGH',
+        actionUrl: '/dashboard'
+      });
+      if (approvedUser.email) {
+        await emailService.sendEmail({
+          to: approvedUser.email,
+          subject: 'Your Account is Now Active — Procurement ERP',
+          html: accountActivatedTemplate({
+            userName: approvedUser.name || 'User',
+            role: approvedUser.roleId === 3 ? 'Procurement Officer' : approvedUser.roleId === 2 ? 'Procurement Manager' : 'Staff',
+            systemUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
+          })
+        });
+      }
+    } catch (notifErr) {
+      console.error('Failed to send account activation notification:', notifErr.message);
+    }
 
     res.json({
       message: `${approvedUser.name} has been approved successfully.`,

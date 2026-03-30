@@ -357,6 +357,7 @@ model Vendor {
   evaluationSummaries       EvaluationSummary[]         @relation("EvalRecommendedVendor")
   contacts                  VendorContact[]
   teamMembers               VendorTeamMember[]
+  documentAlerts            DocumentAlert[]
 
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
@@ -848,10 +849,13 @@ model Notification {
   priority  String    @default("MEDIUM")
   read      Boolean   @default(false)
   readAt    DateTime?
-  actionUrl String?
-  metadata  Json?
-  createdAt DateTime  @default(now())
-  user      User      @relation("UserNotifications", fields: [userId], references: [id])
+  actionUrl  String?
+  module     String?
+  entityId   Int?
+  entityType String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+  user       User      @relation("UserNotifications", fields: [userId], references: [id])
 
   @@map("notifications")
 }
@@ -1203,4 +1207,18 @@ model BrandingSettings {
   statYears       Int      @default(0)
   updatedAt       DateTime @updatedAt
   updatedById     Int?
+}
+
+model DocumentAlert {
+  id              Int       @id @default(autoincrement())
+  vendorId        Int
+  vendor          Vendor    @relation(fields: [vendorId], references: [id])
+  documentType    String
+  expiryDate      DateTime
+  alertSentAt     DateTime?
+  daysUntilExpiry Int
+  isResolved      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+
+  @@map("document_alerts")
 }

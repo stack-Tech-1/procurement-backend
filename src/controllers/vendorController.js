@@ -3,6 +3,7 @@ import { generatePresignedUrl, getPublicUrl, uploadToS3 } from '../lib/awsS3.js'
 import path from 'path';
 import { emailService } from '../services/emailService.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { notificationService } from '../services/notificationService.js';
 
 /**
  * Get vendor details for Admin/Procurement view
@@ -1496,6 +1497,22 @@ export const adminAction = async (req, res) => {
             }).catch(err => console.warn('Vendor status email failed:', err.message));
         }
 
+        // In-app notification for vendor user
+        if (vendor.user?.id || vendor.userId) {
+            const vendorUserId = vendor.user?.id || vendor.userId;
+            notificationService.createNotification({
+                userId: vendorUserId,
+                title: isApproved ? 'Vendor Application Approved' : `Vendor Status Updated`,
+                body: notes || (isApproved ? 'Your vendor application has been approved.' : `Your vendor status has been updated to ${newStatus.replace(/_/g,' ')}.`),
+                type: isApproved ? 'INFO' : 'WARNING',
+                priority: 'HIGH',
+                actionUrl: '/dashboard/vendor',
+                module: 'VENDOR',
+                entityId: vendorId,
+                entityType: 'Vendor'
+            }).catch(err => console.warn('Vendor notification failed:', err.message));
+        }
+
         res.json({ success: true, vendor });
     } catch (error) {
         console.error('Error performing admin action:', error);
@@ -1535,5 +1552,51 @@ export const verifyVendorDocument = async (req, res) => {
     } catch (error) {
         console.error('Error verifying vendor document:', error);
         res.status(500).json({ error: 'Failed to verify document' });
+    }
+};
+
+/**
+ * Get vendors with documents expiring in next 30 days, grouped by urgency
+ * GET /api/vendors/document-alerts
+ */
+export const getDocumentAlerts = async (req, res) => {
+    try {
+        const now = new Date();
+        const in30Days = new Date(now.getTime() + 30 * 86400000);
+
+        const docs = await prisma.vendorDocument.findMany({
+            where: {
+                expiryDate: { gte: now, lte: in30Days },
+                vendor: { status: { in: ['APPROVED', 'CONDITIONAL_APPROVED', 'UNDER_REVIEW'] } }
+            },
+            include: {
+                vendor: { select: { id: true, companyLegalName: true, vendorClass: true, status: true } }
+            },
+            orderBy: { expiryDate: 'asc' }
+        });
+
+        const alerts = docs.map(d => {
+            const daysLeft = Math.ceil((new Date(d.expiryDate) - now) / 86400000);
+            return {
+                id: d.id,
+                vendorId: d.vendorId,
+                docType: d.docType || d.documentType,
+                expiryDate: d.expiryDate,
+                daysLeft,
+                urgency: daysLeft <= 7 ? 'CRITICAL' : daysLeft <= 15 ? 'WARNING' : 'NOTICE',
+                vendor: d.vendor
+            };
+        });
+
+        const summary = {
+            critical: alerts.filter(a => a.urgency === 'CRITICAL').length,
+            warning: alerts.filter(a => a.urgency === 'WARNING').length,
+            notice: alerts.filter(a => a.urgency === 'NOTICE').length
+        };
+
+        res.json({ summary, alerts: alerts.slice(0, 50) });
+    } catch (error) {
+        console.error('Error fetching document alerts:', error);
+        res.status(500).json({ error: 'Failed to fetch document alerts' });
     }
 };
