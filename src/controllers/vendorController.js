@@ -1,6 +1,8 @@
 import prisma from "../config/prismaClient.js";
 import { generatePresignedUrl, getPublicUrl, uploadToS3 } from '../lib/awsS3.js';
 import path from 'path';
+import { emailService } from '../services/emailService.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 /**
  * Get vendor details for Admin/Procurement view
@@ -43,11 +45,37 @@ export const getVendorDetails = async (req, res) => {
                 assignedReviewer: { select: { id: true, name: true, email: true } },
                 lastReviewedBy: { select: { id: true, name: true, email: true } },
                 user: {
-                    select: { 
-                        name: true, 
-                        email: true, 
-                        jobTitle: true, 
+                    select: {
+                        name: true,
+                        email: true,
+                        jobTitle: true,
                         department: true,
+                    }
+                },
+                vendorQualifications: {
+                    orderBy: { updatedAt: 'desc' },
+                    take: 1,
+                    select: {
+                        id: true,
+                        status: true,
+                        step: true,
+                        saveAsDraft: true,
+                        technicalScore: true,
+                        financialScore: true,
+                        experienceScore: true,
+                        responsivenessScore: true,
+                        documentScore: true,
+                        totalScore: true,
+                        isAIGenerated: true,
+                        aiEvaluationNotes: true,
+                        engineerNotes: true,
+                        recommendation: true,
+                        engineerReviewedAt: true,
+                        reviewerNotes: true,
+                        conditionNote: true,
+                        submissionDate: true,
+                        updatedAt: true,
+                        engineerReviewer: { select: { id: true, name: true } },
                     }
                 },
             },
@@ -96,7 +124,7 @@ export const getVendorDetails = async (req, res) => {
         }
 
         // 5. Destructure and return the cleaned object
-        const { categories, documents, projectExperience, ...restVendor } = vendor;
+        const { categories, documents, projectExperience, vendorQualifications, ...restVendor } = vendor;
 
         res.json({
             ...restVendor,
@@ -104,6 +132,7 @@ export const getVendorDetails = async (req, res) => {
             documents: documentsWithUrls,
             projectExperience: projectsWithUrls,
             categories: simplifiedCategories,
+            vendorQualifications: vendorQualifications || [],
         });
 
     } catch (error) {
@@ -994,6 +1023,483 @@ export const uploadVendorDocument = async (req, res) => {
     } catch (error) {
         console.error('Error uploading vendor document:', error);
         res.status(500).json({ error: 'Failed to upload document' });
+    }
+};
+
+// ─── Qualification & Evaluation ──────────────────────────────────────────────
+
+/**
+ * Check if a CR number already exists
+ * GET /api/vendors/check-cr?crNumber=XXX
+ */
+export const checkCrNumber = async (req, res) => {
+    const { crNumber } = req.query;
+    if (!crNumber) return res.status(400).json({ error: 'crNumber is required' });
+    try {
+        const vendor = await prisma.vendor.findUnique({ where: { crNumber } });
+        if (!vendor) return res.json({ exists: false });
+        // If caller is the vendor role, check if it's their own record
+        if (req.user?.roleId === 4) {
+            const own = await prisma.vendor.findUnique({ where: { userId: req.user.id } });
+            return res.json({ exists: own?.crNumber !== crNumber });
+        }
+        res.json({ exists: true });
+    } catch (error) {
+        console.error('Error checking CR number:', error);
+        res.status(500).json({ error: 'Failed to check CR number' });
+    }
+};
+
+/**
+ * Get the vendor's current draft qualification
+ * GET /api/vendor/qualification/draft
+ */
+export const getQualificationDraft = async (req, res) => {
+    try {
+        const vendor = await prisma.vendor.findUnique({
+            where: { userId: req.user.id },
+            include: {
+                documents: true,
+                contacts: true,
+                teamMembers: true,
+                projectExperience: true,
+                categories: { include: { category: { select: { id: true, name: true, csiCode: true } } } },
+            },
+        });
+        if (!vendor) return res.status(404).json({ error: 'Vendor profile not found' });
+
+        const qualification = await prisma.vendorQualification.findFirst({
+            where: { vendorId: vendor.id, saveAsDraft: true },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        const simplifiedCategories = vendor.categories.map(vc => vc.category);
+        // Presign document URLs
+        const documents = await Promise.all(
+            vendor.documents.map(async (doc) => {
+                if (doc.url && !doc.url.startsWith('http')) {
+                    const url = await generatePresignedUrl(doc.url, 3600) || doc.url;
+                    return { ...doc, url };
+                }
+                return doc;
+            })
+        );
+
+        res.json({ vendor: { ...vendor, categories: simplifiedCategories, documents }, qualification });
+    } catch (error) {
+        console.error('Error getting qualification draft:', error);
+        res.status(500).json({ error: 'Failed to get draft' });
+    }
+};
+
+/**
+ * Save qualification form as draft
+ * POST /api/vendor/qualification/save-draft
+ */
+export const saveQualificationDraft = async (req, res) => {
+    try {
+        const vendor = await prisma.vendor.findUnique({ where: { userId: req.user.id }, include: { documents: true } });
+        if (!vendor) return res.status(404).json({ error: 'Vendor profile not found' });
+
+        const {
+            companyLegalName, companyNameArabic, brandName, companySummary,
+            vendorType, crNumber, vatNumber, zakatNumber, yearsInBusiness, gosiEmployeeCount,
+            chamberClass, chamberExpiryDate, ownershipType,
+            addressStreet, addressCity, addressRegion, addressCountry,
+            website, headOfficeLocation,
+            contacts = [], teamMembers = [], categoryIds = [], step = 1,
+            projects = [], productsAndServices = [],
+        } = req.body;
+
+        // Update vendor fields
+        const updatedVendor = await prisma.vendor.update({
+            where: { id: vendor.id },
+            data: {
+                ...(companyLegalName !== undefined && { companyLegalName }),
+                ...(companyNameArabic !== undefined && { companyNameArabic }),
+                ...(brandName !== undefined && { brandName }),
+                ...(companySummary !== undefined && { companySummary }),
+                ...(vendorType !== undefined && { vendorType }),
+                ...(crNumber !== undefined && { crNumber }),
+                ...(vatNumber !== undefined && { vatNumber }),
+                ...(zakatNumber !== undefined && { zakatNumber }),
+                ...(yearsInBusiness !== undefined && { yearsInBusiness: parseInt(yearsInBusiness) }),
+                ...(gosiEmployeeCount !== undefined && { gosiEmployeeCount: parseInt(gosiEmployeeCount) }),
+                ...(chamberClass !== undefined && { chamberClass }),
+                ...(chamberExpiryDate !== undefined && { chamberExpiryDate: chamberExpiryDate ? new Date(chamberExpiryDate) : null }),
+                ...(ownershipType !== undefined && { ownershipType }),
+                ...(addressStreet !== undefined && { addressStreet }),
+                ...(addressCity !== undefined && { addressCity }),
+                ...(addressRegion !== undefined && { addressRegion }),
+                ...(addressCountry !== undefined && { addressCountry }),
+                ...(website !== undefined && { website }),
+                ...(headOfficeLocation !== undefined && { headOfficeLocation }),
+                ...(productsAndServices.length > 0 && { productsAndServices }),
+            },
+        });
+
+        // Upsert contacts
+        if (contacts.length > 0) {
+            await prisma.vendorContact.deleteMany({ where: { vendorId: vendor.id } });
+            await prisma.vendorContact.createMany({
+                data: contacts.map(c => ({ vendorId: vendor.id, ...c })),
+            });
+        }
+
+        // Upsert team members
+        if (teamMembers.length > 0) {
+            await prisma.vendorTeamMember.deleteMany({ where: { vendorId: vendor.id } });
+            await prisma.vendorTeamMember.createMany({
+                data: teamMembers.map(m => ({ vendorId: vendor.id, ...m })),
+            });
+        }
+
+        // Calculate profileCompletionPct
+        const hasCompanyInfo = !!(companyLegalName || vendor.companyLegalName);
+        const hasContacts = contacts.length > 0 || (await prisma.vendorContact.count({ where: { vendorId: vendor.id } })) > 0;
+        const docCount = vendor.documents.length;
+        const hasExperience = projects.length > 0 || vendor.productsAndServices?.length > 0;
+        const hasCategories = categoryIds.length > 0;
+        const pct = [hasCompanyInfo, hasContacts, docCount >= 5, hasExperience, hasCategories]
+            .filter(Boolean).length * 20;
+
+        await prisma.vendor.update({ where: { id: vendor.id }, data: { profileCompletionPct: pct } });
+
+        // Upsert VendorQualification (draft)
+        const existingQ = await prisma.vendorQualification.findFirst({
+            where: { vendorId: vendor.id, saveAsDraft: true },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        let qualification;
+        if (existingQ) {
+            qualification = await prisma.vendorQualification.update({
+                where: { id: existingQ.id },
+                data: { step, saveAsDraft: true },
+            });
+        } else {
+            qualification = await prisma.vendorQualification.create({
+                data: { vendorId: vendor.id, step, saveAsDraft: true, status: 'DRAFT' },
+            });
+        }
+
+        res.json({ vendor: updatedVendor, qualification });
+    } catch (error) {
+        console.error('Error saving qualification draft:', error);
+        res.status(500).json({ error: 'Failed to save draft' });
+    }
+};
+
+/**
+ * Submit qualification for review
+ * POST /api/vendor/qualification/submit
+ */
+export const submitQualification = async (req, res) => {
+    try {
+        const vendor = await prisma.vendor.findUnique({
+            where: { userId: req.user.id },
+            include: { documents: true, user: { select: { email: true, name: true } } },
+        });
+        if (!vendor) return res.status(404).json({ error: 'Vendor profile not found' });
+
+        const BASE_REQUIRED = [
+            'COMMERCIAL_REGISTRATION', 'ZAKAT_CERTIFICATE', 'VAT_CERTIFICATE', 'GOSI_CERTIFICATE',
+            'ISO_CERTIFICATE', 'BANK_LETTER', 'COMPANY_PROFILE', 'FINANCIAL_FILE', 'VENDOR_CODE_OF_CONDUCT',
+        ];
+        const CONTRACTOR_REQUIRED = ['HSE_PLAN', 'INSURANCE_CERTIFICATE', 'ORGANIZATION_CHART', 'QUALITY_PLAN'];
+        const SUPPLIER_REQUIRED = ['SASO_SABER_CERTIFICATE', 'TECHNICAL_FILE'];
+
+        const vType = vendor.vendorType || '';
+        const isContractor = ['Contractor', 'Subcontractor'].includes(vType);
+        const isSupplier = ['Supplier', 'Manufacturer', 'Distributor'].includes(vType);
+
+        const required = [
+            ...BASE_REQUIRED,
+            ...(isContractor ? CONTRACTOR_REQUIRED : []),
+            ...(isSupplier ? SUPPLIER_REQUIRED : []),
+        ];
+
+        const now = new Date();
+        const uploadedTypes = vendor.documents
+            .filter(d => !d.expiryDate || new Date(d.expiryDate) >= now)
+            .map(d => d.docType);
+
+        const missing = required.filter(r => !uploadedTypes.includes(r));
+        if (missing.length > 0) {
+            return res.status(400).json({ error: 'Missing or expired mandatory documents', missing });
+        }
+
+        // Update vendor and qualification
+        const updatedVendor = await prisma.vendor.update({
+            where: { id: vendor.id },
+            data: { status: 'UNDER_REVIEW' },
+        });
+
+        const existingQ = await prisma.vendorQualification.findFirst({
+            where: { vendorId: vendor.id },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        if (existingQ) {
+            await prisma.vendorQualification.update({
+                where: { id: existingQ.id },
+                data: { saveAsDraft: false, submissionDate: now, status: 'SUBMITTED' },
+            });
+        } else {
+            await prisma.vendorQualification.create({
+                data: { vendorId: vendor.id, saveAsDraft: false, submissionDate: now, status: 'SUBMITTED' },
+            });
+        }
+
+        // Send emails (non-blocking)
+        const vendorEmail = vendor.user?.email;
+        if (vendorEmail) {
+            emailService.sendEmail({
+                to: vendorEmail,
+                subject: 'Qualification Submission Confirmed — Procurement ERP',
+                html: `<p>Dear ${vendor.user?.name || vendor.companyLegalName},</p>
+                       <p>Your vendor qualification has been successfully submitted and is now under review by our procurement team.</p>
+                       <p>We will notify you once the review is complete. Your reference number is <strong>#${vendor.vendorId || vendor.id}</strong>.</p>
+                       <p>Best regards,<br/>Procurement Team</p>`,
+            }).catch(err => console.warn('Vendor email failed:', err.message));
+        }
+
+        const procEmail = process.env.PROCUREMENT_EMAIL;
+        if (procEmail) {
+            emailService.sendEmail({
+                to: procEmail,
+                subject: `New Vendor Qualification Submitted — ${vendor.companyLegalName}`,
+                html: `<p>A new vendor qualification has been submitted and requires review.</p>
+                       <p><strong>Company:</strong> ${vendor.companyLegalName}<br/>
+                       <strong>Type:</strong> ${vendor.vendorType}<br/>
+                       <strong>CR:</strong> ${vendor.crNumber || 'N/A'}</p>
+                       <p>Please log in to review the submission.</p>`,
+            }).catch(err => console.warn('Procurement email failed:', err.message));
+        }
+
+        res.json({ success: true, vendor: updatedVendor });
+    } catch (error) {
+        console.error('Error submitting qualification:', error);
+        res.status(500).json({ error: 'Failed to submit qualification' });
+    }
+};
+
+/**
+ * Run AI evaluation for a vendor
+ * POST /api/vendors/:id/evaluation/ai
+ */
+export const runAIEvaluation = async (req, res) => {
+    const vendorId = parseInt(req.params.id);
+    if (isNaN(vendorId)) return res.status(400).json({ error: 'Invalid vendor ID' });
+
+    try {
+        const vendor = await prisma.vendor.findUnique({
+            where: { id: vendorId },
+            include: { documents: true, projectExperience: true },
+        });
+        if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+        const now = new Date();
+        const ALL_REQUIRED = [
+            'COMMERCIAL_REGISTRATION', 'ZAKAT_CERTIFICATE', 'VAT_CERTIFICATE', 'GOSI_CERTIFICATE',
+            'ISO_CERTIFICATE', 'BANK_LETTER', 'COMPANY_PROFILE', 'FINANCIAL_FILE', 'VENDOR_CODE_OF_CONDUCT',
+        ];
+        const validDocs = vendor.documents.filter(d => !d.expiryDate || new Date(d.expiryDate) >= now);
+        const validDocTypes = validDocs.map(d => d.docType);
+        const requiredPresent = ALL_REQUIRED.filter(r => validDocTypes.includes(r)).length;
+
+        const documentScore = parseFloat(((requiredPresent / ALL_REQUIRED.length) * 10).toFixed(2));
+        const responsivenessScore = parseFloat(req.body.responsivenessScore) || 7;
+        const technicalScore = parseFloat(req.body.technicalScore) || 5;
+        const financialScore = parseFloat(req.body.financialScore) || 5;
+        const experienceScore = vendor.projectExperience.length > 0
+            ? Math.min(10, vendor.projectExperience.length * 2)
+            : 5;
+
+        const totalScore = parseFloat(
+            (documentScore * 0.20 + technicalScore * 0.25 + financialScore * 0.20 + experienceScore * 0.25 + responsivenessScore * 0.10) * 10
+        ).toFixed(1);
+
+        const vendorClass = totalScore >= 85 ? 'A' : totalScore >= 70 ? 'B' : totalScore >= 55 ? 'C' : 'D';
+
+        // Upsert qualification
+        const existing = await prisma.vendorQualification.findFirst({
+            where: { vendorId },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        let qualification;
+        const scoreData = {
+            documentScore, technicalScore, financialScore, experienceScore, responsivenessScore,
+            totalScore: parseFloat(totalScore),
+            isAIGenerated: true,
+            aiEvaluationNotes: `AI evaluation: ${requiredPresent}/${ALL_REQUIRED.length} required docs valid. ${vendor.projectExperience.length} project(s) on record.`,
+            status: 'UNDER_REVIEW',
+            saveAsDraft: false,
+        };
+
+        if (existing) {
+            qualification = await prisma.vendorQualification.update({ where: { id: existing.id }, data: scoreData });
+        } else {
+            qualification = await prisma.vendorQualification.create({ data: { vendorId, ...scoreData } });
+        }
+
+        // Update vendor scores
+        await prisma.vendor.update({
+            where: { id: vendorId },
+            data: { qualificationScore: parseFloat(totalScore), vendorClass, lastEvaluatedAt: now },
+        });
+
+        await logAudit(req.user.id, 'AI_EVALUATION_RUN', 'VendorQualification', qualification.id, { vendorId, totalScore });
+
+        res.json({
+            qualification,
+            breakdown: { documentScore, technicalScore, financialScore, experienceScore, responsivenessScore },
+            totalScore: parseFloat(totalScore),
+            vendorClass,
+        });
+    } catch (error) {
+        console.error('Error running AI evaluation:', error);
+        res.status(500).json({ error: 'Failed to run AI evaluation' });
+    }
+};
+
+/**
+ * Submit engineer review of AI evaluation
+ * POST /api/vendors/:id/evaluation/review
+ */
+export const submitEngineerReview = async (req, res) => {
+    const vendorId = parseInt(req.params.id);
+    if (isNaN(vendorId)) return res.status(400).json({ error: 'Invalid vendor ID' });
+
+    try {
+        const { technicalScore, financialScore, experienceScore, engineerNotes, recommendation } = req.body;
+        if (!engineerNotes) return res.status(400).json({ error: 'engineerNotes is required' });
+        if (!recommendation) return res.status(400).json({ error: 'recommendation is required' });
+
+        const existing = await prisma.vendorQualification.findFirst({
+            where: { vendorId },
+            orderBy: { updatedAt: 'desc' },
+        });
+        if (!existing) return res.status(404).json({ error: 'No qualification record found. Run AI evaluation first.' });
+
+        const tScore = parseFloat(technicalScore) || existing.technicalScore || 5;
+        const fScore = parseFloat(financialScore) || existing.financialScore || 5;
+        const eScore = parseFloat(experienceScore) || existing.experienceScore || 5;
+        const dScore = existing.documentScore || 5;
+        const rScore = existing.responsivenessScore || 7;
+
+        const totalScore = parseFloat(
+            (dScore * 0.20 + tScore * 0.25 + fScore * 0.20 + eScore * 0.25 + rScore * 0.10) * 10
+        ).toFixed(1);
+
+        const qualification = await prisma.vendorQualification.update({
+            where: { id: existing.id },
+            data: {
+                technicalScore: tScore,
+                financialScore: fScore,
+                experienceScore: eScore,
+                totalScore: parseFloat(totalScore),
+                engineerNotes,
+                recommendation,
+                engineerReviewerId: req.user.id,
+                engineerReviewedAt: new Date(),
+                status: 'ENGINEER_REVIEWED',
+            },
+        });
+
+        await logAudit(req.user.id, 'ENGINEER_REVIEW_SUBMITTED', 'VendorQualification', qualification.id, { vendorId, recommendation });
+
+        res.json(qualification);
+    } catch (error) {
+        console.error('Error submitting engineer review:', error);
+        res.status(500).json({ error: 'Failed to submit engineer review' });
+    }
+};
+
+/**
+ * Admin action on vendor qualification
+ * POST /api/vendors/:id/qualification/admin-action
+ */
+export const adminAction = async (req, res) => {
+    const vendorId = parseInt(req.params.id);
+    if (isNaN(vendorId)) return res.status(400).json({ error: 'Invalid vendor ID' });
+
+    try {
+        const {
+            action, vendorClass, notes, nextReviewDate,
+            assignedReviewerId, sendEmailToVendor, conditionNote,
+        } = req.body;
+
+        // Role enforcement
+        if (['CONDITIONAL_APPROVE', 'BLACKLIST'].includes(action) && req.user.roleId > 2) {
+            return res.status(403).json({ error: 'This action requires Manager role or above' });
+        }
+
+        const STATUS_MAP = {
+            APPROVE: 'APPROVED',
+            REJECT: 'REJECTED',
+            NEEDS_RENEWAL: 'NEEDS_RENEWAL',
+            SEND_FOR_CORRECTION: 'UNDER_REVIEW',
+            TEMPORARY_HOLD: 'TEMPORARY_HOLD',
+            CONDITIONAL_APPROVE: 'CONDITIONAL_APPROVED',
+            BLACKLIST: 'BLACKLISTED',
+        };
+
+        const newStatus = STATUS_MAP[action];
+        if (!newStatus) return res.status(400).json({ error: 'Invalid action' });
+
+        const isApproved = ['APPROVE', 'CONDITIONAL_APPROVE'].includes(action);
+
+        const vendor = await prisma.vendor.update({
+            where: { id: vendorId },
+            data: {
+                status: newStatus,
+                ...(vendorClass && { vendorClass }),
+                reviewNotes: notes || null,
+                ...(assignedReviewerId && { assignedReviewerId: parseInt(assignedReviewerId) }),
+                ...(nextReviewDate && { nextReviewDate: new Date(nextReviewDate) }),
+                conditionalApproval: action === 'CONDITIONAL_APPROVE',
+                ...(conditionNote !== undefined && { conditionalNote: conditionNote }),
+                isQualified: isApproved,
+                lastReviewedById: req.user.id,
+                lastReviewedAt: new Date(),
+            },
+            include: { user: { select: { email: true, name: true } } },
+        });
+
+        // Update qualification record
+        await prisma.vendorQualification.updateMany({
+            where: { vendorId },
+            data: { status: newStatus, reviewerNotes: notes || null, conditionNote: conditionNote || null },
+        });
+
+        await logAudit(req.user.id, `VENDOR_${action}`, 'Vendor', vendorId, { action, newStatus, notes });
+
+        // Send email to vendor
+        if (sendEmailToVendor && vendor.user?.email) {
+            const actionLabels = {
+                APPROVE: 'Approved', REJECT: 'Rejected', NEEDS_RENEWAL: 'Needs Renewal',
+                SEND_FOR_CORRECTION: 'Sent for Correction', TEMPORARY_HOLD: 'Temporarily On Hold',
+                CONDITIONAL_APPROVE: 'Conditionally Approved', BLACKLIST: 'Blacklisted',
+            };
+            const label = actionLabels[action] || action;
+            emailService.sendEmail({
+                to: vendor.user.email,
+                subject: `Your Vendor Qualification Status — ${label}`,
+                html: `<p>Dear ${vendor.user.name || vendor.companyLegalName},</p>
+                       <p>Your vendor qualification status has been updated to: <strong>${label}</strong>.</p>
+                       ${notes ? `<p><strong>Notes:</strong> ${notes}</p>` : ''}
+                       ${conditionNote ? `<p><strong>Conditions:</strong> ${conditionNote}</p>` : ''}
+                       <p>Please log in to your vendor portal for further details.</p>
+                       <p>Best regards,<br/>Procurement Team</p>`,
+            }).catch(err => console.warn('Vendor status email failed:', err.message));
+        }
+
+        res.json({ success: true, vendor });
+    } catch (error) {
+        console.error('Error performing admin action:', error);
+        res.status(500).json({ error: 'Failed to perform admin action' });
     }
 };
 

@@ -18,6 +18,8 @@ enum VendorStatus {
   REJECTED
   BLACKLISTED
   NEEDS_RENEWAL
+  TEMPORARY_HOLD
+  CONDITIONAL_APPROVED
 }
 
 enum VendorDocumentType {
@@ -259,6 +261,7 @@ model User {
   purchaseOrdersApproved        PurchaseOrder[]              @relation("POApprovedBy")
   purchaseOrdersPending         PurchaseOrder[]              @relation("POPendingWith")
   vendorQualificationsPending   VendorQualification[]        @relation("VQPendingWith")
+  vendorQualificationsReviewed  VendorQualification[]        @relation("VQEngineerReviewer")
   invoicesCreated               Invoice[]                    @relation("InvoiceCreatedBy")
   invoicesPending               Invoice[]                    @relation("InvoicePendingWith")
   rfqsPendingWith               RFQ[]                        @relation("RFQPendingWith")
@@ -325,6 +328,16 @@ model Vendor {
   csiSpecialization         String?                     // ← kept (was in localhost)
   mainCategory              String[]                    // ← kept if still used, but consider migrating to relation
   subCategory               String?
+  companyNameArabic         String?
+  brandName                 String?
+  companySummary            String?
+  headOfficeLocation        String?
+  zakatNumber               String?
+  companyProfileUrl         String?
+  profileCompletionPct      Int                         @default(0)
+  conditionalApproval       Boolean                     @default(false)
+  conditionalNote           String?
+  lastEvaluatedAt           DateTime?
 
   user                      User                        @relation(fields: [userId], references: [id])
   projectExperience         VendorProjectExperience[]
@@ -342,6 +355,8 @@ model Vendor {
   technicalComparisons      TechnicalComparison[]
   financialComparisons      FinancialComparison[]
   evaluationSummaries       EvaluationSummary[]         @relation("EvalRecommendedVendor")
+  contacts                  VendorContact[]
+  teamMembers               VendorTeamMember[]
 
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
@@ -1097,10 +1112,55 @@ model VendorQualification {
   priority            Priority  @default(MEDIUM)
   pendingWithPersonId Int?
   notes               String?
+  saveAsDraft         Boolean   @default(false)
+  step                Int       @default(1)
+  technicalScore      Float?
+  financialScore      Float?
+  experienceScore     Float?
+  responsivenessScore Float?
+  documentScore       Float?
+  totalScore          Float?
+  isAIGenerated       Boolean   @default(false)
+  aiEvaluationNotes   String?
+  reviewerNotes       String?
+  conditionNote       String?
+  submissionDate      DateTime?
+  engineerReviewedAt  DateTime?
+  engineerReviewerId  Int?
+  engineerNotes       String?
+  recommendation      String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   vendor              Vendor    @relation(fields: [vendorId], references: [id])
   pendingWithPerson   User?     @relation("VQPendingWith", fields: [pendingWithPersonId], references: [id])
+  engineerReviewer    User?     @relation("VQEngineerReviewer", fields: [engineerReviewerId], references: [id])
+}
+
+model VendorContact {
+  id          Int      @id @default(autoincrement())
+  vendorId    Int
+  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  contactType String
+  name        String
+  email       String?
+  phone       String?
+  jobTitle    String?
+  createdAt   DateTime @default(now())
+}
+
+model VendorTeamMember {
+  id                     Int      @id @default(autoincrement())
+  vendorId               Int
+  vendor                 Vendor   @relation(fields: [vendorId], references: [id])
+  fullName               String
+  jobTitle               String
+  department             String?
+  phone                  String?
+  email                  String?
+  employeeId             String?
+  authorizationLetterUrl String?
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
 }
 
 model Invoice {

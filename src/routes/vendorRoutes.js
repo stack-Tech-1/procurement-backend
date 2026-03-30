@@ -11,6 +11,10 @@ import {
   updateVendorQualification,
   uploadVendorDocument,
   verifyVendorDocument,
+  checkCrNumber,
+  runAIEvaluation,
+  submitEngineerReview,
+  adminAction,
 } from "../controllers/vendorController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { authorizeRole } from "../middleware/roleMiddleware.js";
@@ -60,9 +64,17 @@ router.put(
   updateVendorQualification
 );
 
+// CR number duplicate check (before /:id to avoid param conflict)
+router.get('/check-cr', authenticateToken, checkCrNumber);
+
 // Document upload and verification (must be before generic /:id routes)
 router.put('/:id/documents/:docType', authenticateToken, authorizeRole([1, 2, 3]), upload.single('file'), uploadVendorDocument);
 router.patch('/:id/documents/:docType/verify', authenticateToken, authorizeRole([1, 2, 3]), verifyVendorDocument);
+
+// Evaluation & admin action (before generic /:id)
+router.post('/:id/evaluation/ai', authenticateToken, authorizeRole([1, 2, 3]), runAIEvaluation);
+router.post('/:id/evaluation/review', authenticateToken, authorizeRole([1, 2, 3]), submitEngineerReview);
+router.post('/:id/qualification/admin-action', authenticateToken, authorizeRole([1, 2, 3]), adminAction);
 
 router.put("/:id", authenticateToken, adminUpdateVendor);
 router.get('/:id', authenticateToken, getVendorDetails);
