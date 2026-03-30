@@ -1,6 +1,7 @@
 // backend/src/services/taskService.js - ENHANCED VERSION
 import prisma from '../config/prismaClient.js';
 import { notificationService } from './notificationService.js';
+import { emailService } from './emailService.js';
 import { ROLES } from '../constants/roles.js';
 
 export const taskService = {
@@ -46,95 +47,130 @@ export const taskService = {
     };
   },
 
-  // Create task with notification
+  // Create task with notification + email
   async createTask(taskData) {
     const task = await prisma.task.create({
       data: {
         title: taskData.title,
         description: taskData.description,
         taskType: taskData.taskType,
-        assignedTo: taskData.assignedTo,
+        assignedTo: parseInt(taskData.assignedTo),
         assignedById: taskData.assignedById,
         dueDate: new Date(taskData.dueDate),
         priority: taskData.priority || 'MEDIUM',
-        status: taskData.status || 'NOT_STARTED',
-        remarks: taskData.remarks
+        status: 'NOT_STARTED',
+        remarks: taskData.remarks,
+        relatedModule: taskData.relatedModule || null,
+        relatedEntityId: taskData.relatedEntityId ? parseInt(taskData.relatedEntityId) : null,
       },
       include: {
-        assignedUser: {
-          select: { id: true, name: true, email: true }
-        },
-        assignedByUser: {
-          select: { id: true, name: true, email: true }
-        }
-      }
+        assignedUser: { select: { id: true, name: true, email: true } },
+        assignedByUser: { select: { id: true, name: true, email: true } },
+      },
     });
 
-    // Send notification to assigned user
+    // In-app notification
     await notificationService.createNotification({
-      userId: taskData.assignedTo,
-      title: `New Task Assigned: ${taskData.title}`,
-      body: `You have been assigned a new task. Due: ${new Date(taskData.dueDate).toLocaleDateString()}`,
+      userId: task.assignedTo,
+      title: `New Task Assigned: ${task.title}`,
+      body: `You have been assigned a new task. Due: ${new Date(task.dueDate).toLocaleDateString()}`,
       type: 'INFO',
-      priority: taskData.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
-      actionUrl: `/dashboard/tasks`,
-      metadata: {
-        taskId: task.id,
-        taskType: taskData.taskType,
-        dueDate: taskData.dueDate
-      }
+      priority: task.priority === 'HIGH' || task.priority === 'URGENT' ? 'HIGH' : 'MEDIUM',
+      actionUrl: '/dashboard/tasks',
+      metadata: { taskId: task.id, taskType: task.taskType, dueDate: task.dueDate },
     });
+
+    // Email notification to assigned user
+    if (task.assignedUser?.email) {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      await emailService.sendEmail({
+        to: task.assignedUser.email,
+        subject: `New Task Assigned: ${task.title}`,
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+            <div style="background:#0A1628;padding:20px 28px"><h2 style="color:#B8960A;margin:0">New Task Assigned</h2></div>
+            <div style="padding:28px">
+              <p style="color:#374151">Hi ${task.assignedUser.name},</p>
+              <p style="color:#374151">You have been assigned a new task by <strong>${task.assignedByUser?.name || 'your manager'}</strong>:</p>
+              <div style="background:#f9fafb;border-left:4px solid #B8960A;padding:16px;border-radius:4px;margin:16px 0">
+                <p style="margin:0 0 8px;font-weight:bold;font-size:16px;color:#111827">${task.title}</p>
+                ${task.description ? `<p style="margin:0 0 8px;color:#6b7280;font-size:14px">${task.description}</p>` : ''}
+                <p style="margin:0;color:#6b7280;font-size:13px">Due: <strong>${new Date(task.dueDate).toLocaleDateString('en-SA', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}</strong> · Priority: <strong>${task.priority}</strong></p>
+              </div>
+              <a href="${baseUrl}/dashboard/tasks" style="display:inline-block;background:#B8960A;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold">View Task</a>
+            </div>
+          </div>`,
+      }).catch(err => console.error('[createTask] Email failed:', err));
+    }
 
     return task;
   },
 
-  // Update task status with validation
-  async updateTaskStatus(taskId, status, remarks, userId) {
+  // Update task status with validation (supports progressPct + completedAt)
+  async updateTaskStatus(taskId, status, remarks, userId, progressPct) {
     const task = await prisma.task.findUnique({
       where: { id: taskId },
       include: {
-        assignedUser: true,
-        assignedByUser: true
-      }
+        assignedUser: { select: { id: true, name: true, email: true } },
+        assignedByUser: { select: { id: true, name: true, email: true } },
+      },
     });
 
-    if (!task) {
-      throw new Error('Task not found');
-    }
+    if (!task) throw new Error('Task not found');
 
-    // Check if user has permission to update this task
     if (task.assignedTo !== userId && task.assignedById !== userId) {
       throw new Error('Unauthorized to update this task');
     }
 
+    const updateData = {
+      status,
+      updatedAt: new Date(),
+      ...(remarks !== undefined && { remarks }),
+      ...(progressPct !== undefined && { progressPct: Math.min(100, Math.max(0, parseInt(progressPct) || 0)) }),
+    };
+
+    if (status === 'COMPLETED') {
+      updateData.completedAt = new Date();
+      updateData.progressPct = 100;
+    }
+
     const updatedTask = await prisma.task.update({
       where: { id: taskId },
-      data: {
-        status,
-        ...(remarks && { remarks }),
-        updatedAt: new Date()
-      },
-      include: {
-        assignedUser: {
-          select: { id: true, name: true, email: true }
-        }
-      }
+      data: updateData,
+      include: { assignedUser: { select: { id: true, name: true, email: true } } },
     });
 
-    // Notify manager when task is completed
-    if (status === 'COMPLETED' && task.assignedById !== userId) {
+    // Notify + email manager when task is completed
+    if (status === 'COMPLETED') {
       await notificationService.createNotification({
         userId: task.assignedById,
         title: `Task Completed: ${task.title}`,
-        body: `Task assigned to ${task.assignedUser.name} has been completed`,
+        body: `Task assigned to ${task.assignedUser?.name} has been completed`,
         type: 'INFO',
         priority: 'MEDIUM',
-        actionUrl: `/dashboard/tasks`,
-        metadata: {
-          taskId: task.id,
-          completedBy: task.assignedUser.name
-        }
+        actionUrl: '/dashboard/tasks',
+        metadata: { taskId: task.id, completedBy: task.assignedUser?.name },
       });
+
+      if (task.assignedByUser?.email && task.assignedById !== userId) {
+        const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        await emailService.sendEmail({
+          to: task.assignedByUser.email,
+          subject: `✅ Task Completed: ${task.title}`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+              <div style="background:#0A1628;padding:20px 28px"><h2 style="color:#B8960A;margin:0">Task Completed</h2></div>
+              <div style="padding:28px">
+                <p style="color:#374151">Hi ${task.assignedByUser.name},</p>
+                <div style="background:#f0fdf4;border-left:4px solid #16a34a;padding:16px;border-radius:4px;margin:16px 0">
+                  <p style="margin:0 0 6px;font-weight:bold;font-size:15px;color:#111827">${task.title}</p>
+                  <p style="margin:0;color:#6b7280;font-size:13px">Completed by <strong>${task.assignedUser?.name}</strong> on ${new Date().toLocaleDateString('en-SA')}</p>
+                </div>
+                <a href="${baseUrl}/dashboard/tasks" style="display:inline-block;background:#16a34a;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold">View Task</a>
+              </div>
+            </div>`,
+        }).catch(err => console.error('[updateTaskStatus] Email failed:', err));
+      }
     }
 
     return updatedTask;
@@ -545,7 +581,168 @@ async getUserTasks(userId, filters = {}) {
     }
   },
 
-async calculateOnTimeCompletionRate(whereCondition) {
+// ─── New: my-tasks endpoint ───────────────────────────────────────────────────
+  async getMyTasksList(userId, filters = {}) {
+    const where = { assignedTo: userId };
+    if (filters.status) where.status = filters.status;
+    if (filters.priority) where.priority = filters.priority;
+
+    const tasks = await prisma.task.findMany({
+      where,
+      include: {
+        assignedByUser: { select: { id: true, name: true } },
+      },
+      orderBy: { dueDate: 'asc' },
+    });
+
+    const now = new Date();
+    return tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      taskType: t.taskType,
+      priority: t.priority,
+      status: t.status,
+      dueDate: t.dueDate,
+      daysUntilDue: Math.ceil((new Date(t.dueDate) - now) / 86400000),
+      isEscalated: t.isEscalated,
+      reminderSent: t.reminderSent,
+      progressPct: t.progressPct,
+      remarks: t.remarks,
+      relatedModule: t.relatedModule,
+      relatedEntityId: t.relatedEntityId,
+      assignedByName: t.assignedByUser?.name || null,
+      assignedById: t.assignedByUser?.id || null,
+    }));
+  },
+
+  // ─── New: team-overview endpoint ─────────────────────────────────────────────
+  async getTeamOverviewData(managerId, roleId) {
+    const whereTeam = roleId <= 1 ? {} : { assignedById: managerId };
+
+    const allTasks = await prisma.task.findMany({
+      where: whereTeam,
+      include: {
+        assignedUser: { select: { id: true, name: true, email: true, jobTitle: true } },
+      },
+      orderBy: { dueDate: 'asc' },
+    });
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+
+    // Group by assignee
+    const byUser = new Map();
+    for (const task of allTasks) {
+      const uid = task.assignedTo;
+      if (!byUser.has(uid)) {
+        byUser.set(uid, {
+          userId: uid,
+          userName: task.assignedUser?.name || 'Unknown',
+          jobTitle: task.assignedUser?.jobTitle || '',
+          tasks: [],
+          overdueCount: 0,
+          inProgressCount: 0,
+          completedLast30Days: 0,
+        });
+      }
+      const u = byUser.get(uid);
+      u.tasks.push({
+        id: task.id,
+        title: task.title,
+        taskType: task.taskType,
+        priority: task.priority,
+        status: task.status,
+        dueDate: task.dueDate,
+        daysUntilDue: Math.ceil((new Date(task.dueDate) - now) / 86400000),
+        isEscalated: task.isEscalated,
+        progressPct: task.progressPct,
+      });
+      if (task.status === 'OVERDUE') u.overdueCount++;
+      if (task.status === 'IN_PROGRESS') u.inProgressCount++;
+      if (task.status === 'COMPLETED' && task.completedAt && new Date(task.completedAt) >= thirtyDaysAgo) {
+        u.completedLast30Days++;
+      }
+    }
+
+    const teamMembers = Array.from(byUser.values()).map(u => {
+      const total = u.tasks.length;
+      const completed = u.tasks.filter(t => t.status === 'COMPLETED').length;
+      return { ...u, successRate: total > 0 ? Math.round((completed / total) * 100) : 0 };
+    });
+
+    const totalTasks = allTasks.length;
+    const totalOverdue = allTasks.filter(t => t.status === 'OVERDUE').length;
+    const totalCompleted = allTasks.filter(t => t.status === 'COMPLETED').length;
+    const avgSuccessRate = teamMembers.length > 0
+      ? Math.round(teamMembers.reduce((s, u) => s + u.successRate, 0) / teamMembers.length)
+      : 0;
+
+    return { teamMembers, totals: { totalTasks, totalOverdue, totalCompleted, averageSuccessRate: avgSuccessRate } };
+  },
+
+  // ─── New: reassign task ───────────────────────────────────────────────────────
+  async reassignTask(taskId, newAssignedToId, reason, managerId) {
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignedUser: { select: { id: true, name: true, email: true } },
+        assignedByUser: { select: { id: true, name: true } },
+      },
+    });
+    if (!task) throw new Error('Task not found');
+
+    const newAssignee = await prisma.user.findUnique({
+      where: { id: parseInt(newAssignedToId) },
+      select: { id: true, name: true, email: true },
+    });
+    if (!newAssignee) throw new Error('New assignee not found');
+
+    const oldName = task.assignedUser?.name || 'Unknown';
+    const reassignNote = `[Reassigned ${new Date().toLocaleDateString('en-SA')}: from ${oldName} to ${newAssignee.name}. Reason: ${reason || 'N/A'}]`;
+    const updatedRemarks = task.remarks ? `${task.remarks}\n${reassignNote}` : reassignNote;
+
+    const updated = await prisma.task.update({
+      where: { id: taskId },
+      data: { assignedTo: newAssignee.id, remarks: updatedRemarks },
+      include: { assignedUser: { select: { id: true, name: true, email: true } } },
+    });
+
+    await notificationService.createNotification({
+      userId: newAssignee.id,
+      title: `Task Reassigned to You: ${task.title}`,
+      body: `You have been assigned a task previously held by ${oldName}. Due: ${new Date(task.dueDate).toLocaleDateString()}`,
+      type: 'INFO',
+      priority: task.priority === 'HIGH' || task.priority === 'URGENT' ? 'HIGH' : 'MEDIUM',
+      actionUrl: '/dashboard/tasks',
+      metadata: { taskId: task.id },
+    });
+
+    if (newAssignee.email) {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      await emailService.sendEmail({
+        to: newAssignee.email,
+        subject: `Task Reassigned to You: ${task.title}`,
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+            <div style="background:#0A1628;padding:20px 28px"><h2 style="color:#B8960A;margin:0">Task Reassigned</h2></div>
+            <div style="padding:28px">
+              <p style="color:#374151">Hi ${newAssignee.name},</p>
+              <p>A task has been reassigned to you:</p>
+              <div style="background:#f9fafb;border-left:4px solid #B8960A;padding:16px;border-radius:4px;margin:16px 0">
+                <p style="margin:0 0 6px;font-weight:bold;font-size:15px">${task.title}</p>
+                <p style="margin:0;color:#6b7280;font-size:13px">Previously assigned to: ${oldName} · Due: ${new Date(task.dueDate).toLocaleDateString('en-SA')}</p>
+                ${reason ? `<p style="margin:6px 0 0;color:#6b7280;font-size:13px">Reason: ${reason}</p>` : ''}
+              </div>
+              <a href="${baseUrl}/dashboard/tasks" style="display:inline-block;background:#B8960A;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold">View Task</a>
+            </div>
+          </div>`,
+      }).catch(err => console.error('[reassignTask] Email failed:', err));
+    }
+
+    return updated;
+  },
+
+  async calculateOnTimeCompletionRate(whereCondition) {
   try {
     const onTimeTasks = await prisma.task.count({
       where: {

@@ -945,11 +945,18 @@ model Task {
   dueDate        DateTime
   priority       Priority   @default(MEDIUM)
   status         TaskStatus @default(NOT_STARTED)
-  remarks        String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  assignedByUser User       @relation("CreatedTasks", fields: [assignedById], references: [id])
-  assignedUser   User       @relation("AssignedTasks", fields: [assignedTo], references: [id])
+  remarks         String?
+  progressPct     Int       @default(0)
+  completedAt     DateTime?
+  relatedModule   String?
+  relatedEntityId Int?
+  isEscalated     Boolean   @default(false)
+  escalatedAt     DateTime?
+  reminderSent    Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  assignedByUser  User      @relation("CreatedTasks", fields: [assignedById], references: [id])
+  assignedUser    User      @relation("AssignedTasks", fields: [assignedTo], references: [id])
 }
 
 model SignatureRequest {

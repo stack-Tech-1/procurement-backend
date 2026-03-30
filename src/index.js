@@ -19,6 +19,8 @@ import adminFilesRouter from './routes/admin/files.js';
 import qualificationRoutes from './routes/qualification.routes.js';
 import vendorManagementRoute from "./routes/vendor/management.js";
 import { startExpiryCheckJob } from "./jobs/expiryCheckJob.js";
+import { runTaskEscalationJob } from "./jobs/taskEscalationJob.js";
+import { runDailySummaryJob } from "./jobs/dailySummaryJob.js";
 import categoryRoutes from './routes/categoryRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import submissionRoutes from "./routes/submissionRoutes.js";
@@ -130,8 +132,16 @@ app.listen(PORT, async () => {
     console.log('✅ Default data initialization completed');
     
     // Start background jobs after server is running
-    startExpiryCheckJob(); 
+    startExpiryCheckJob();
     schedulerService.startScheduledJobs();
+
+    // Task escalation: run once on startup, then every 60 minutes
+    runTaskEscalationJob();
+    setInterval(runTaskEscalationJob, 60 * 60 * 1000);
+
+    // Daily summary: scheduler cron handles timing; also check every 30 min
+    setInterval(runDailySummaryJob, 30 * 60 * 1000);
+
     console.log('✅ Background jobs started');
     
   } catch (error) {

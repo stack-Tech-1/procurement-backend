@@ -94,10 +94,10 @@ export const taskController = {
   async updateTaskStatus(req, res) {
     try {
       const { taskId } = req.params;
-      const { status, remarks } = req.body;
+      const { status, remarks, progressPct } = req.body;
       const { userId } = req.user;
 
-      const task = await taskService.updateTaskStatus(parseInt(taskId), status, remarks, userId);
+      const task = await taskService.updateTaskStatus(parseInt(taskId), status, remarks, userId, progressPct);
       
       res.json({
         success: true,
@@ -116,29 +116,67 @@ export const taskController = {
   async assignTask(req, res) {
     try {
       const { userId, roleId } = req.user;
-      
-      if (roleId !== 2) { // Only Managers can assign tasks
-        return res.status(403).json({
-          success: false,
-          message: 'Only managers can assign tasks'
-        });
+
+      if (roleId !== 2) {
+        return res.status(403).json({ success: false, message: 'Only managers can assign tasks' });
       }
 
       const { taskId } = req.params;
       const { assignedTo, dueDate, priority } = req.body;
 
       const task = await taskService.assignTask(parseInt(taskId), assignedTo, dueDate, priority, userId);
-      
-      res.json({
-        success: true,
-        data: task
-      });
+      res.json({ success: true, data: task });
     } catch (error) {
       console.error('Error assigning task:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to assign task'
-      });
+      res.status(500).json({ success: false, message: 'Failed to assign task' });
     }
-  }
+  },
+
+  // GET /api/tasks/my-tasks — tasks assigned to the logged-in user
+  async getMyTasks(req, res) {
+    try {
+      const { id: userId } = req.user;
+      const { status, priority } = req.query;
+      const tasks = await taskService.getMyTasksList(userId, { status, priority });
+      res.json({ success: true, data: tasks });
+    } catch (error) {
+      console.error('Error getting my tasks:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch tasks' });
+    }
+  },
+
+  // GET /api/tasks/team-overview — manager team grouped data
+  async getTeamOverview(req, res) {
+    try {
+      const { id: userId, roleId } = req.user;
+      if (roleId > 2) {
+        return res.status(403).json({ success: false, message: 'Manager access required' });
+      }
+      const data = await taskService.getTeamOverviewData(userId, roleId);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Error getting team overview:', error);
+      res.status(500).json({ success: false, message: 'Failed to fetch team overview' });
+    }
+  },
+
+  // PATCH /api/tasks/:taskId/reassign — reassign to different user (Manager only)
+  async reassignTask(req, res) {
+    try {
+      const { id: userId, roleId } = req.user;
+      if (roleId !== 2) {
+        return res.status(403).json({ success: false, message: 'Only managers can reassign tasks' });
+      }
+      const { taskId } = req.params;
+      const { newAssignedToId, reason } = req.body;
+      if (!newAssignedToId) {
+        return res.status(400).json({ success: false, message: 'newAssignedToId is required' });
+      }
+      const task = await taskService.reassignTask(parseInt(taskId), newAssignedToId, reason, userId);
+      res.json({ success: true, data: task });
+    } catch (error) {
+      console.error('Error reassigning task:', error);
+      res.status(500).json({ success: false, message: error.message || 'Failed to reassign task' });
+    }
+  },
 };

@@ -2,6 +2,7 @@
 import cron from 'node-cron';
 import { notificationService } from './notificationService.js';
 import { taskService } from './taskService.js';
+import { runDailySummaryJob } from '../jobs/dailySummaryJob.js';
 import prisma from '../config/prismaClient.js';
 
 
@@ -54,6 +55,16 @@ export const schedulerService = {
         }
       });
         
+    // Daily summary email to managers at 7:00 AM
+    cron.schedule('0 7 * * *', async () => {
+      try {
+        console.log('⏰ Running daily summary job...');
+        await runDailySummaryJob();
+      } catch (error) {
+        console.error('❌ Daily summary job failed:', error);
+      }
+    });
+
     console.log('✅ All scheduled jobs started successfully');
   },
 
