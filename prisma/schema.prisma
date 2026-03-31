@@ -240,6 +240,7 @@ model User {
   ipcs                          IPC[]                         @relation("UserIPCs")
   rfqs                          RFQ[]                         @relation("UserRFQs")
   reportsCreated                Report[]                      @relation("UserCreatedReports")
+  scheduledReports              ScheduledReport[]             @relation("UserScheduledReports")
   reportExecutions              ReportExecution[]             @relation("UserReportExecutions")
   tasksCreated                  Task[]                        @relation("CreatedTasks")
   tasksAssigned                 Task[]                        @relation("AssignedTasks")
@@ -1221,4 +1222,23 @@ model DocumentAlert {
   createdAt       DateTime  @default(now())
 
   @@map("document_alerts")
+}
+
+model ScheduledReport {
+  id              Int       @id @default(autoincrement())
+  reportType      String
+  frequency       String    // DAILY | WEEKLY | MONTHLY
+  dayOfWeek       Int?      // 0=Sun ... 6=Sat (for WEEKLY)
+  dayOfMonth      Int?      // 1-31 (for MONTHLY)
+  recipientEmails String[]
+  filters         Json?
+  lastRunAt       DateTime?
+  nextRunAt       DateTime
+  isActive        Boolean   @default(true)
+  createdById     Int
+  createdBy       User      @relation("UserScheduledReports", fields: [createdById], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("scheduled_reports")
 }

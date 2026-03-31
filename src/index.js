@@ -47,6 +47,18 @@ import brandingAdminRouter, { publicBrandingRouter } from './routes/admin/brandi
 import managerDashboardRouter from './routes/dashboard/manager.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
+import newReportRoutes from './routes/reportRoutes.js';
+import {
+  generateVendorMasterListReport,
+  generateProcurementSpendReport,
+  generateVendorPerformanceReport,
+  generateRFQAnalyticsReport,
+  generateDocumentComplianceReport,
+  generateOverdueTasksReport,
+  generateWeeklyExecutiveSummary,
+} from './services/reportGeneratorService.js';
+import { emailService } from './services/emailService.js';
+import prisma from './config/prismaClient.js';
 
 dotenv.config();
 const app = express();
@@ -98,6 +110,7 @@ app.use('/api/branding', publicBrandingRouter);
 app.use('/api/dashboard/manager', authenticateToken, managerDashboardRouter);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/new-reports', newReportRoutes);
 
 
 
@@ -157,6 +170,77 @@ app.listen(PORT, async () => {
     cron.schedule(process.env.CRON_WEEKLY_REPORT || '0 8 * * 1', () => {
       console.log('[Cron] Running weekly report job...');
       runWeeklyReportJob();
+    });
+
+    // Scheduled reports: every hour, check for due reports
+    cron.schedule('0 * * * *', async () => {
+      console.log('[Cron] Checking scheduled reports...');
+      try {
+        const due = await prisma.scheduledReport.findMany({
+          where: { isActive: true, nextRunAt: { lte: new Date() } },
+        });
+        for (const sr of due) {
+          try {
+            let reportData, subject;
+            if (sr.reportType === 'VENDOR_MASTER_LIST') {
+              reportData = await generateVendorMasterListReport(sr.filters || {});
+              subject = 'KUN ProcureTrack — Vendor Master List Report';
+            } else if (sr.reportType === 'PROCUREMENT_SPEND') {
+              reportData = await generateProcurementSpendReport(sr.filters || {});
+              subject = 'KUN ProcureTrack — Procurement Spend Report';
+            } else if (sr.reportType === 'VENDOR_PERFORMANCE') {
+              reportData = await generateVendorPerformanceReport(sr.filters || {});
+              subject = 'KUN ProcureTrack — Vendor Performance Report';
+            } else if (sr.reportType === 'RFQ_ANALYTICS') {
+              reportData = await generateRFQAnalyticsReport(sr.filters || {});
+              subject = 'KUN ProcureTrack — RFQ Analytics Report';
+            } else if (sr.reportType === 'DOCUMENT_COMPLIANCE') {
+              reportData = await generateDocumentComplianceReport();
+              subject = 'KUN ProcureTrack — Document Compliance Report';
+            } else if (sr.reportType === 'OVERDUE_TASKS') {
+              reportData = await generateOverdueTasksReport(sr.filters || {});
+              subject = 'KUN ProcureTrack — Overdue Tasks Report';
+            } else if (sr.reportType === 'WEEKLY_SUMMARY') {
+              reportData = await generateWeeklyExecutiveSummary();
+              subject = 'KUN ProcureTrack — Weekly Executive Summary';
+            } else {
+              continue;
+            }
+
+            for (const email of sr.recipientEmails) {
+              await emailService.sendEmail({
+                to: email,
+                subject,
+                html: `<p style="font-family:sans-serif">Your scheduled <strong>${sr.reportType.replace(/_/g, ' ')}</strong> report is ready.<br>Total records: <strong>${reportData?.summary?.total ?? 'N/A'}</strong></p>`,
+              });
+            }
+
+            const now = new Date();
+            let nextRunAt = new Date(now);
+            if (sr.frequency === 'DAILY') {
+              nextRunAt.setDate(nextRunAt.getDate() + 1);
+              nextRunAt.setHours(8, 0, 0, 0);
+            } else if (sr.frequency === 'WEEKLY') {
+              const targetDay = sr.dayOfWeek ?? 1;
+              nextRunAt.setDate(nextRunAt.getDate() + ((7 - nextRunAt.getDay() + targetDay) % 7 || 7));
+              nextRunAt.setHours(8, 0, 0, 0);
+            } else if (sr.frequency === 'MONTHLY') {
+              const targetDay = sr.dayOfMonth ?? 1;
+              nextRunAt = new Date(now.getFullYear(), now.getMonth() + 1, targetDay, 8, 0, 0, 0);
+            }
+
+            await prisma.scheduledReport.update({
+              where: { id: sr.id },
+              data: { lastRunAt: now, nextRunAt },
+            });
+            console.log(`[Cron] Sent scheduled report ${sr.id} (${sr.reportType}) to ${sr.recipientEmails.join(', ')}`);
+          } catch (srErr) {
+            console.error(`[Cron] Failed to process scheduled report ${sr.id}:`, srErr.message);
+          }
+        }
+      } catch (cronErr) {
+        console.error('[Cron] Scheduled reports check failed:', cronErr.message);
+      }
     });
 
     console.log('✅ Background jobs started');
