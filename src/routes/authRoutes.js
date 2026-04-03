@@ -2,6 +2,8 @@ import express from "express";
 import { register, login, getPendingUsers, approveUser, changePassword } from "../controllers/authController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import prisma from "../config/prismaClient.js";
+import jwt from "jsonwebtoken";
+import speakeasy from "speakeasy";
 
 const router = express.Router();
 
@@ -99,7 +101,59 @@ router.post('/verify-captcha', async (req, res) => {
   }
 });
 
-  export default router;
+// ── POST /api/auth/2fa/verify-login ─────────────────────────────────────────
+// Accepts tempToken + 6-digit TOTP code, returns full JWT
+router.post('/2fa/verify-login', async (req, res) => {
+  try {
+    const { tempToken, code } = req.body;
+    if (!tempToken || !code) return res.status(400).json({ error: 'tempToken and code are required.' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired challenge token.' });
+    }
+
+    if (decoded.type !== '2fa_challenge') {
+      return res.status(401).json({ error: 'Invalid challenge token.' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, name: true, email: true, roleId: true, status: true, isActive: true,
+        employeeId: true, jobTitle: true, department: true, lastLoginDate: true,
+        mustChangePassword: true, avatarUrl: true, preferredLanguage: true, preferredTheme: true,
+        twoFactorSecret: true, twoFactorEnabled: true },
+    });
+
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+      return res.status(400).json({ error: 'User not found or 2FA not configured.' });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: code.toString().replace(/\s/g, ''),
+      window: 2,
+    });
+
+    if (!verified) {
+      return res.status(401).json({ error: 'Invalid 2FA code. Please try again.' });
+    }
+
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginDate: new Date() } });
+
+    const fullToken = jwt.sign({ id: user.id, roleId: user.roleId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const { twoFactorSecret: _, ...safeUser } = user;
+    res.json({ token: fullToken, user: safeUser });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to verify 2FA login' });
+  }
+});
+
+export default router;
 
 
 

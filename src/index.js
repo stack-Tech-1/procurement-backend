@@ -49,6 +49,8 @@ import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import newReportRoutes from './routes/reportRoutes.js';
 import userManagementRoutes from './routes/admin/userManagement.js';
+import profileRoutes from './routes/profileRoutes.js';
+import systemSettingsRoutes from './routes/admin/systemSettings.js';
 import { logAction } from './services/auditService.js';
 import {
   generateVendorMasterListReport,
@@ -116,6 +118,8 @@ app.use('/api/new-reports', newReportRoutes);
 app.use('/api/admin/users', userManagementRoutes);
 app.use('/api/admin/invitations', userManagementRoutes);
 app.use('/api/admin/audit-logs', userManagementRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/admin/settings', systemSettingsRoutes);
 
 
 

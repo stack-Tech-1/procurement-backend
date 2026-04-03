@@ -1,10 +1,12 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import speakeasy from "speakeasy";
 import prisma from "../config/prismaClient.js";
 import { notificationService } from '../services/notificationService.js';
 import { emailService } from '../services/emailService.js';
 import { accountActivatedTemplate } from '../services/emailTemplates.js';
 import { logAction } from '../services/auditService.js';
+import { getSetting } from '../utils/getSystemSetting.js';
 
 const VALID_VENDOR_TYPES = ["Contractor", "Supplier", "Manufacturer", "Distributor", "Service Provider", "Consultant", "Subcontractor"];
 const VALID_DEPARTMENTS = ["Procurement", "Contracts", "Finance", "Technical", "Admin"];
@@ -197,17 +199,30 @@ export const login = async (req, res) => {
       return res.status(403).json({ error: "Account is pending admin approval." });
     }
 
-    // Check brute-force lock
-    if (user.failedLoginAttempts >= 10 && user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
-      return res.status(403).json({ error: "Account locked due to too many failed attempts. Try again in 15 minutes." });
+    // Check brute-force lock (use dynamic settings)
+    const maxAttempts = parseInt(await getSetting('max_login_attempts', '10'));
+    const lockoutMinutes = parseInt(await getSetting('lockout_duration_minutes', '15'));
+    if (user.failedLoginAttempts >= maxAttempts && user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+      return res.status(403).json({ error: `Account locked due to too many failed attempts. Try again in ${lockoutMinutes} minutes.` });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       const newCount = (user.failedLoginAttempts || 0) + 1;
-      const lockData = newCount >= 10 ? { lockedUntil: new Date(Date.now() + 15 * 60 * 1000) } : {};
+      const lockData = newCount >= maxAttempts ? { lockedUntil: new Date(Date.now() + lockoutMinutes * 60 * 1000) } : {};
       await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: newCount, ...lockData } });
       return res.status(400).json({ error: "Invalid email or password" });
+    }
+
+    // If 2FA is enabled, return a short-lived challenge token instead of full JWT
+    if (user.twoFactorEnabled) {
+      await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lockedUntil: null } });
+      const tempToken = jwt.sign(
+        { id: user.id, type: '2fa_challenge' },
+        process.env.JWT_SECRET,
+        { expiresIn: '5m' }
+      );
+      return res.json({ requiresTwoFactor: true, tempToken });
     }
 
     // Successful login — reset counters and update lastLoginDate
@@ -230,6 +245,9 @@ export const login = async (req, res) => {
         department: true,
         lastLoginDate: true,
         mustChangePassword: true,
+        avatarUrl: true,
+        preferredLanguage: true,
+        preferredTheme: true,
       },
     });
 

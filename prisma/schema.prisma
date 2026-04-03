@@ -244,10 +244,17 @@ model User {
   accessScope                   String                        @default("ALL_PROJECTS")
   notes                         String?
   mustChangePassword            Boolean                       @default(false)
+  preferredLanguage             String                        @default("en")
+  preferredTheme                String                        @default("light")
+  notificationPrefs             Json?
+  timezone                      String                        @default("Asia/Riyadh")
+  profileCompletedAt            DateTime?
   invitedById                   Int?
   invitedBy                     User?                         @relation("InvitedBy", fields: [invitedById], references: [id])
   invitations                   User[]                        @relation("InvitedBy")
   userInvitations               UserInvitation[]              @relation("InvitationCreator")
+  backupCodes                   BackupCode[]
+  systemSettingsUpdated         SystemSetting[]
 
   approvals                     Approval[]                    @relation("UserApprovals")
   requestedApprovals            Approval[]                    @relation("UserRequestedApprovals")
@@ -1278,4 +1285,24 @@ model UserInvitation {
   createdById Int
   createdBy   User      @relation("InvitationCreator", fields: [createdById], references: [id])
   createdAt   DateTime  @default(now())
+}
+
+model SystemSetting {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique
+  value       String
+  category    String
+  description String?
+  updatedById Int?
+  updatedBy   User?     @relation(fields: [updatedById], references: [id])
+  updatedAt   DateTime  @updatedAt
+}
+
+model BackupCode {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 }
