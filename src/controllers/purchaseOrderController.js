@@ -1,6 +1,7 @@
 // backend/src/controllers/purchaseOrderController.js
 import prisma from '../config/prismaClient.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { logUserAction } from '../services/auditService.js';
 import { emailService } from '../services/emailService.js';
 import { notificationService } from '../services/notificationService.js';
 
@@ -225,6 +226,7 @@ export const createPurchaseOrder = async (req, res) => {
     });
 
     await logAudit(req.user.id, 'PO_CREATED', 'PurchaseOrder', po.id, { poNumber, totalValue });
+    await logUserAction(req, 'PO_CREATED', 'PURCHASE_ORDERS', po.id, 'PurchaseOrder', null, { poNumber, totalValue, projectName });
 
     res.status(201).json(po);
   } catch (error) {
@@ -354,6 +356,8 @@ export const updatePOStatus = async (req, res) => {
         to: newStatus,
         poNumber: po.poNumber,
       });
+      await logUserAction(req, `PO_${newStatus}`, 'PURCHASE_ORDERS', id, 'PurchaseOrder',
+        { status: currentStatus }, { status: newStatus, poNumber: po.poNumber });
     }
 
     // Email vendor when ISSUED

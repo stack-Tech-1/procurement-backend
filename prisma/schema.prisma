@@ -228,6 +228,26 @@ model User {
   employeeId                    String?                       @unique
   jobTitle                      String?
   lastLoginDate                 DateTime?
+  phoneNumber                   String?
+  avatarUrl                     String?
+  twoFactorEnabled              Boolean                       @default(false)
+  twoFactorSecret               String?
+  twoFactorMethod               String?
+  lastPasswordChange            DateTime?
+  passwordResetToken            String?
+  passwordResetExpiry           DateTime?
+  failedLoginAttempts           Int                           @default(0)
+  lockedUntil                   DateTime?
+  isSuspended                   Boolean                       @default(false)
+  suspendedReason               String?
+  suspendedUntil                DateTime?
+  accessScope                   String                        @default("ALL_PROJECTS")
+  notes                         String?
+  mustChangePassword            Boolean                       @default(false)
+  invitedById                   Int?
+  invitedBy                     User?                         @relation("InvitedBy", fields: [invitedById], references: [id])
+  invitations                   User[]                        @relation("InvitedBy")
+  userInvitations               UserInvitation[]              @relation("InvitationCreator")
 
   approvals                     Approval[]                    @relation("UserApprovals")
   requestedApprovals            Approval[]                    @relation("UserRequestedApprovals")
@@ -837,6 +857,11 @@ model AuditLog {
   entity    String?
   entityId  Int?
   data      Json?
+  module    String?
+  ipAddress String?
+  userAgent String?
+  oldValues Json?
+  newValues Json?
   createdAt DateTime @default(now())
   user      User?    @relation("UserAuditLogs", fields: [userId], references: [id])
 }
@@ -1241,4 +1266,16 @@ model ScheduledReport {
   updatedAt       DateTime  @updatedAt
 
   @@map("scheduled_reports")
+}
+
+model UserInvitation {
+  id          Int       @id @default(autoincrement())
+  email       String
+  roleId      Int
+  token       String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdById Int
+  createdBy   User      @relation("InvitationCreator", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
 }

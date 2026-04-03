@@ -3,6 +3,7 @@ import { generatePresignedUrl, getPublicUrl, uploadToS3 } from '../lib/awsS3.js'
 import path from 'path';
 import { emailService } from '../services/emailService.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { logUserAction } from '../services/auditService.js';
 import { notificationService } from '../services/notificationService.js';
 
 /**
@@ -347,6 +348,8 @@ export const createVendor = async (req, res) => {
         // Flatten the category response for consistency
         const simplifiedCategories = vendor.categories.map(vc => vc.category);
         const { categories, ...restVendor } = vendor;
+
+        await logUserAction(req, 'VENDOR_CREATED', 'VENDOR_MANAGEMENT', vendor.id, 'Vendor', null, { companyLegalName, email });
 
         res.status(201).json({
             ...restVendor,
@@ -1512,6 +1515,8 @@ export const adminAction = async (req, res) => {
                 entityType: 'Vendor'
             }).catch(err => console.warn('Vendor notification failed:', err.message));
         }
+
+        await logUserAction(req, 'VENDOR_STATUS_CHANGED', 'VENDOR_MANAGEMENT', vendorId, 'Vendor', null, { action, newStatus, vendorClass });
 
         res.json({ success: true, vendor });
     } catch (error) {

@@ -48,6 +48,8 @@ import managerDashboardRouter from './routes/dashboard/manager.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import newReportRoutes from './routes/reportRoutes.js';
+import userManagementRoutes from './routes/admin/userManagement.js';
+import { logAction } from './services/auditService.js';
 import {
   generateVendorMasterListReport,
   generateProcurementSpendReport,
@@ -111,6 +113,9 @@ app.use('/api/dashboard/manager', authenticateToken, managerDashboardRouter);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/new-reports', newReportRoutes);
+app.use('/api/admin/users', userManagementRoutes);
+app.use('/api/admin/invitations', userManagementRoutes);
+app.use('/api/admin/audit-logs', userManagementRoutes);
 
 
 
@@ -243,8 +248,84 @@ app.listen(PORT, async () => {
       }
     });
 
+    // Daily security automation: runs at 2 AM every day
+    cron.schedule('0 2 * * *', async () => {
+      console.log('[Cron] Running daily security automation...');
+      try {
+        const now = new Date();
+
+        // 1. Unlock accounts where lockedUntil has passed
+        await prisma.user.updateMany({
+          where: { lockedUntil: { lte: now } },
+          data: { lockedUntil: null, failedLoginAttempts: 0 },
+        });
+
+        // 2. Auto-deactivate non-vendor users inactive for 60+ days
+        const sixtyDaysAgo = new Date(now - 60 * 24 * 60 * 60 * 1000);
+        const fiftyFiveDaysAgo = new Date(now - 55 * 24 * 60 * 60 * 1000);
+        const ninetyDaysAgo = new Date(now - 90 * 24 * 60 * 60 * 1000);
+
+        const inactiveUsers = await prisma.user.findMany({
+          where: { isActive: true, lastLoginDate: { lt: sixtyDaysAgo }, roleId: { not: 4 } },
+          select: { id: true, email: true, name: true },
+        });
+        for (const u of inactiveUsers) {
+          await prisma.user.update({ where: { id: u.id }, data: { isActive: false } });
+          await logAction({ userId: null, action: 'AUTO_DEACTIVATED', module: 'SYSTEM', entityId: u.id, entityType: 'User', newValues: { reason: 'Inactive 60+ days' } });
+          await emailService.sendEmail({
+            to: u.email,
+            subject: 'KUN ProcureTrack — Account Deactivated',
+            html: `<p>Hello ${u.name},</p><p>Your account has been automatically deactivated due to 60 days of inactivity. Please contact your administrator to restore access.</p>`,
+          }).catch(() => {});
+        }
+
+        // 3. Warn users approaching 55 days inactive (5-day warning)
+        const warnInactive = await prisma.user.findMany({
+          where: { isActive: true, lastLoginDate: { lt: fiftyFiveDaysAgo, gte: sixtyDaysAgo }, roleId: { not: 4 } },
+          select: { email: true, name: true },
+        });
+        for (const u of warnInactive) {
+          await emailService.sendEmail({
+            to: u.email,
+            subject: 'KUN ProcureTrack — Account Inactivity Warning',
+            html: `<p>Hello ${u.name},</p><p>Your account will be deactivated in 5 days due to inactivity. Please log in to keep your account active.</p>`,
+          }).catch(() => {});
+        }
+
+        // 4. Warn Admin/Manager accounts without 2FA
+        const no2fa = await prisma.user.findMany({
+          where: { isActive: true, twoFactorEnabled: false, roleId: { in: [1, 2] } },
+          select: { email: true, name: true },
+        });
+        for (const u of no2fa) {
+          await emailService.sendEmail({
+            to: u.email,
+            subject: 'KUN ProcureTrack — Security Reminder: Enable 2FA',
+            html: `<p>Hello ${u.name},</p><p>As an administrator or manager, we strongly recommend enabling two-factor authentication on your account to enhance security.</p>`,
+          }).catch(() => {});
+        }
+
+        // 5. Warn users with password older than 90 days
+        const oldPassword = await prisma.user.findMany({
+          where: { isActive: true, lastPasswordChange: { lt: ninetyDaysAgo }, roleId: { not: 4 } },
+          select: { email: true, name: true },
+        });
+        for (const u of oldPassword) {
+          await emailService.sendEmail({
+            to: u.email,
+            subject: 'KUN ProcureTrack — Password Change Reminder',
+            html: `<p>Hello ${u.name},</p><p>Your password is more than 90 days old. Please update it for security purposes.</p>`,
+          }).catch(() => {});
+        }
+
+        console.log(`[Cron] Security automation: deactivated ${inactiveUsers.length}, warned ${warnInactive.length} inactive, notified ${no2fa.length} without 2FA`);
+      } catch (secErr) {
+        console.error('[Cron] Security automation failed:', secErr.message);
+      }
+    });
+
     console.log('✅ Background jobs started');
-    
+
   } catch (error) {
     console.error('❌ Failed during startup initialization:', error.message);
     console.log('🔄 Continuing server startup despite initialization issues...');

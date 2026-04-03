@@ -1,6 +1,7 @@
 import express from "express";
-import { register, login } from "../controllers/authController.js";
-import { getPendingUsers, approveUser } from "../controllers/authController.js";
+import { register, login, getPendingUsers, approveUser, changePassword } from "../controllers/authController.js";
+import { authenticateToken } from "../middleware/authMiddleware.js";
+import prisma from "../config/prismaClient.js";
 
 const router = express.Router();
 
@@ -8,6 +9,36 @@ router.post("/register", register);
 router.post("/login", login);
 router.get("/pending", getPendingUsers);
 router.put("/approve/:id", approveUser);
+
+// Change password (forced after admin reset)
+router.post("/change-password", authenticateToken, changePassword);
+
+// Validate invitation token (public endpoint)
+router.get("/invitation/:token", async (req, res) => {
+  try {
+    const inv = await prisma.userInvitation.findUnique({ where: { token: req.params.token } });
+    if (!inv || inv.usedAt || new Date(inv.expiresAt) < new Date()) {
+      return res.status(400).json({ error: "Invalid or expired invitation link." });
+    }
+    const role = await prisma.role.findUnique({ where: { id: inv.roleId } });
+    res.json({ success: true, email: inv.email, roleId: inv.roleId, roleName: role?.name });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to validate invitation" });
+  }
+});
+
+// Mark invitation as used after successful registration
+router.patch("/invitation/:token/use", async (req, res) => {
+  try {
+    await prisma.userInvitation.updateMany({
+      where: { token: req.params.token, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to mark invitation as used" });
+  }
+});
 
 
 // Add this route to your backend auth routes

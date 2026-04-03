@@ -4,6 +4,7 @@ import prisma from "../config/prismaClient.js";
 import { notificationService } from '../services/notificationService.js';
 import { emailService } from '../services/emailService.js';
 import { accountActivatedTemplate } from '../services/emailTemplates.js';
+import { logAction } from '../services/auditService.js';
 
 const VALID_VENDOR_TYPES = ["Contractor", "Supplier", "Manufacturer", "Distributor", "Service Provider", "Consultant", "Subcontractor"];
 const VALID_DEPARTMENTS = ["Procurement", "Contracts", "Finance", "Technical", "Admin"];
@@ -185,23 +186,37 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const ipAddress = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection?.remoteAddress || null;
+    const userAgent = req.headers['user-agent'] || null;
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(400).json({ error: "Invalid email or password" });
 
-    // NEW CHECK: Prevent inactive users (Pending Staff) from logging in
+    // Prevent inactive / pending users from logging in
     if (!user.isActive) {
-        return res.status(403).json({ error: "Account is pending admin approval." });
+      return res.status(403).json({ error: "Account is pending admin approval." });
+    }
+
+    // Check brute-force lock
+    if (user.failedLoginAttempts >= 10 && user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+      return res.status(403).json({ error: "Account locked due to too many failed attempts. Try again in 15 minutes." });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) return res.status(400).json({ error: "Invalid email or password" });
+    if (!isValid) {
+      const newCount = (user.failedLoginAttempts || 0) + 1;
+      const lockData = newCount >= 10 ? { lockedUntil: new Date(Date.now() + 15 * 60 * 1000) } : {};
+      await prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: newCount, ...lockData } });
+      return res.status(400).json({ error: "Invalid email or password" });
+    }
 
-    // ✅ UPDATE: Set lastLoginDate before generating token
+    // Successful login — reset counters and update lastLoginDate
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
-      data: { 
-        lastLoginDate: new Date() 
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginDate: new Date(),
       },
       select: {
         id: true,
@@ -213,11 +228,14 @@ export const login = async (req, res) => {
         employeeId: true,
         jobTitle: true,
         department: true,
-        lastLoginDate: true
-      }
+        lastLoginDate: true,
+        mustChangePassword: true,
+      },
     });
 
-    // create token
+    // Audit login
+    await logAction({ userId: user.id, action: 'LOGIN', module: 'AUTH', ipAddress, userAgent });
+
     const token = jwt.sign(
       { id: user.id, roleId: user.roleId },
       process.env.JWT_SECRET,
@@ -227,12 +245,53 @@ export const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token,
-      user: updatedUser
+      user: updatedUser,
     });
-    
+
   } catch (error) {
     console.error("Error logging in:", error);
     res.status(500).json({ error: "Failed to login" });
+  }
+};
+
+/**
+ * Change password (used for forced password change after admin reset)
+ */
+export const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "currentPassword and newPassword are required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) return res.status(400).json({ error: "Current password is incorrect" });
+
+    if (!validatePasswordStrength(newPassword)) {
+      return res.status(400).json({ error: "Password does not meet requirements. Must be at least 8 characters with uppercase, lowercase, number, and special character." });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { password: hashed, mustChangePassword: false, lastPasswordChange: new Date() },
+    });
+
+    await logAction({
+      userId: req.user.id,
+      action: 'PASSWORD_CHANGED',
+      module: 'AUTH',
+      ipAddress: req.ipAddress,
+      userAgent: req.userAgent,
+    });
+
+    res.json({ success: true, message: "Password changed successfully" });
+  } catch (error) {
+    console.error("Error changing password:", error);
+    res.status(500).json({ error: "Failed to change password" });
   }
 };
 
