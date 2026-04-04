@@ -1,6 +1,7 @@
 // backend/src/index.js
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import dotenv from "dotenv";
 import vendorRoutes from "./routes/vendorRoutes.js";
 import materialRoutes from "./routes/materialRoutes.js";
@@ -75,8 +76,15 @@ app.use(cors({
 }));
 
 
+app.use(compression());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
+
+// Cache public branding assets for 1 hour
+app.use('/api/branding', (req, res, next) => {
+  if (req.method === 'GET') res.set('Cache-Control', 'public, max-age=3600');
+  next();
+});
 
 // Routes
 app.use("/api/auth", authRoutes);
