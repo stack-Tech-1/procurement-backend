@@ -85,6 +85,16 @@ router.get("/kpis", async (req, res) => {
       countPendingApprovals(userId, { updatedAt: { gte: lastMonthStart, lte: lastMonthEnd } }),
     ]);
 
+    const TERMINAL_SUBMITTAL = ["APPROVED", "REJECTED", "CANCELLED"];
+    const [overdueSubmittals, overdueDrawings] = await Promise.all([
+      prisma.materialSubmittal.count({
+        where: { requiredDate: { lt: now }, status: { notIn: TERMINAL_SUBMITTAL } },
+      }),
+      prisma.shopDrawing.count({
+        where: { requiredDate: { lt: now }, status: { notIn: TERMINAL_SUBMITTAL } },
+      }),
+    ]);
+
     res.json({
       openPRs,
       trendOpenPRs: calcTrend(openPRs, openPRsLastMonth),
@@ -94,6 +104,8 @@ router.get("/kpis", async (req, res) => {
       trendOverdueTasks: calcTrend(overdueTasks, overdueTasksLastMonth),
       vendorsUnderReview,
       trendVendorsUnderReview: calcTrend(vendorsUnderReview, vendorsUnderReviewLastMonth),
+      overdueSubmittals,
+      overdueDrawings,
     });
   } catch (error) {
     console.error("❌ FULL KPI ERROR:", error);
@@ -271,8 +283,9 @@ router.get("/critical-deadlines", async (req, res) => {
     const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const deadlineFilter = { lte: sevenDaysFromNow };
+    const TERMINAL_SUBMITTAL = ["APPROVED", "REJECTED", "CANCELLED"];
 
-    const [tasks, prs, pos, rfqs, invoices] = await Promise.all([
+    const [tasks, prs, pos, rfqs, invoices, submittals, drawings] = await Promise.all([
       prisma.task.findMany({
         where: { dueDate: deadlineFilter, status: { notIn: ["COMPLETED", "CANCELLED"] } },
         include: { assignedUser: { select: { name: true } } },
@@ -293,6 +306,16 @@ router.get("/critical-deadlines", async (req, res) => {
       prisma.invoice.findMany({
         where: { dueDate: deadlineFilter, status: { notIn: ["PAID", "REJECTED", "CANCELLED"] } },
         orderBy: { dueDate: "asc" },
+      }),
+      prisma.materialSubmittal.findMany({
+        where: { requiredDate: deadlineFilter, status: { notIn: TERMINAL_SUBMITTAL } },
+        include: { vendor: { select: { companyName: true } } },
+        orderBy: { requiredDate: "asc" },
+      }),
+      prisma.shopDrawing.findMany({
+        where: { requiredDate: deadlineFilter, status: { notIn: TERMINAL_SUBMITTAL } },
+        include: { vendor: { select: { companyName: true } } },
+        orderBy: { requiredDate: "asc" },
       }),
     ]);
 
@@ -353,6 +376,28 @@ router.get("/critical-deadlines", async (req, res) => {
         daysUntilDue: daysUntilDue(inv.dueDate),
         priority: inv.priority,
         status: inv.status,
+      })),
+      ...submittals.map((s) => ({
+        id: s.id,
+        task: `${s.submittalNumber} — ${s.specSection}`,
+        module: "Submittal",
+        project: s.projectName,
+        assignedTo: s.vendor?.companyName ?? null,
+        dueDate: s.requiredDate,
+        daysUntilDue: s.requiredDate ? daysUntilDue(s.requiredDate) : null,
+        priority: "MEDIUM",
+        status: s.status,
+      })),
+      ...drawings.map((d) => ({
+        id: d.id,
+        task: `${d.drawingNumber} — ${d.title}`,
+        module: "Shop Drawing",
+        project: d.projectName,
+        assignedTo: d.vendor?.companyName ?? null,
+        dueDate: d.requiredDate,
+        daysUntilDue: d.requiredDate ? daysUntilDue(d.requiredDate) : null,
+        priority: "MEDIUM",
+        status: d.status,
       })),
     ];
 

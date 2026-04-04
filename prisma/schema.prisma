@@ -298,6 +298,16 @@ model User {
   financialComparisonsCreated   FinancialComparison[]        @relation("FinCompCreatedBy")
   evaluationSummariesCreated    EvaluationSummary[]          @relation("EvalCreatedBy")
   evaluationSummariesApproved   EvaluationSummary[]          @relation("EvalApprovedBy")
+  materialSubmittalsSubmitted   MaterialSubmittal[]          @relation("SubmittalSubmittedBy")
+  materialSubmittalsReviewing   MaterialSubmittal[]          @relation("SubmittalReviewer")
+  materialSubmittalsPending     MaterialSubmittal[]          @relation("SubmittalPendingWith")
+  submittalAttachments          SubmittalAttachment[]
+  submittalActivities           SubmittalActivity[]
+  shopDrawingsSubmitted         ShopDrawing[]                @relation("DrawingSubmittedBy")
+  shopDrawingsReviewing         ShopDrawing[]                @relation("DrawingReviewer")
+  shopDrawingsPending           ShopDrawing[]                @relation("DrawingPendingWith")
+  drawingAttachments            DrawingAttachment[]
+  drawingActivities             DrawingActivity[]
 }
 
 model Role {
@@ -386,6 +396,8 @@ model Vendor {
   contacts                  VendorContact[]
   teamMembers               VendorTeamMember[]
   documentAlerts            DocumentAlert[]
+  materialSubmittals        MaterialSubmittal[]
+  shopDrawings              ShopDrawing[]
 
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
@@ -555,6 +567,8 @@ model Contract {
   ipcs            IPC[]
   variationOrders VariationOrder[]
   documents       Document[]       @relation("ContractDocuments")
+  materialSubmittals MaterialSubmittal[]
+  shopDrawings    ShopDrawing[]
 }
 
 model VariationOrder {
@@ -1075,6 +1089,7 @@ model PurchaseOrder {
   updatedAt             DateTime  @updatedAt
   items                 POItem[]
   ipcs                  IPC[]
+  materialSubmittals    MaterialSubmittal[]
 }
 
 model POItem {
@@ -1305,4 +1320,133 @@ model BackupCode {
   codeHash  String
   usedAt    DateTime?
   createdAt DateTime  @default(now())
+}
+
+// ─── Phase 2: Material Submittals ─────────────────────────────────────────────
+
+model MaterialSubmittal {
+  id                  Int       @id @default(autoincrement())
+  submittalNumber     String    @unique
+  projectName         String
+  vendorId            Int
+  vendor              Vendor    @relation(fields: [vendorId], references: [id])
+  contractId          Int?
+  contract            Contract? @relation(fields: [contractId], references: [id])
+  poId                Int?
+  purchaseOrder       PurchaseOrder? @relation(fields: [poId], references: [id])
+  materialDescription String
+  csiCode             String?
+  quantity            Float?
+  unit                String?
+  submittedById       Int
+  submittedBy         User      @relation("SubmittalSubmittedBy", fields: [submittedById], references: [id])
+  assignedReviewerId  Int?
+  assignedReviewer    User?     @relation("SubmittalReviewer", fields: [assignedReviewerId], references: [id])
+  status              String    @default("SUBMITTED")
+  pendingWithDept     String?
+  pendingWithPersonId Int?
+  pendingWithPerson   User?     @relation("SubmittalPendingWith", fields: [pendingWithPersonId], references: [id])
+  submittedDate       DateTime  @default(now())
+  requiredDate        DateTime?
+  reviewedDate        DateTime?
+  approvedDate        DateTime?
+  rejectionReason     String?
+  reviewerNotes       String?
+  revisionNumber      Int       @default(1)
+  parentSubmittalId   Int?
+  parentSubmittal     MaterialSubmittal? @relation("SubmittalRevisions", fields: [parentSubmittalId], references: [id])
+  revisions           MaterialSubmittal[] @relation("SubmittalRevisions")
+  priority            String    @default("MEDIUM")
+  delayDays           Int       @default(0)
+  attachments         SubmittalAttachment[]
+  activityLog         SubmittalActivity[]
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model SubmittalAttachment {
+  id           Int                @id @default(autoincrement())
+  submittalId  Int
+  submittal    MaterialSubmittal  @relation(fields: [submittalId], references: [id])
+  fileName     String
+  fileUrl      String
+  fileType     String
+  uploadedById Int
+  uploadedBy   User               @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime           @default(now())
+}
+
+model SubmittalActivity {
+  id            Int                @id @default(autoincrement())
+  submittalId   Int
+  submittal     MaterialSubmittal  @relation(fields: [submittalId], references: [id])
+  action        String
+  performedById Int
+  performedBy   User               @relation(fields: [performedById], references: [id])
+  notes         String?
+  createdAt     DateTime           @default(now())
+}
+
+// ─── Phase 2: Shop Drawings ───────────────────────────────────────────────────
+
+model ShopDrawing {
+  id                  Int       @id @default(autoincrement())
+  drawingNumber       String    @unique
+  projectName         String
+  vendorId            Int
+  vendor              Vendor    @relation(fields: [vendorId], references: [id])
+  contractId          Int?
+  contract            Contract? @relation(fields: [contractId], references: [id])
+  title               String
+  discipline          String
+  description         String?
+  submittedById       Int
+  submittedBy         User      @relation("DrawingSubmittedBy", fields: [submittedById], references: [id])
+  assignedReviewerId  Int?
+  assignedReviewer    User?     @relation("DrawingReviewer", fields: [assignedReviewerId], references: [id])
+  status              String    @default("SUBMITTED")
+  pendingWithDept     String?
+  pendingWithPersonId Int?
+  pendingWithPerson   User?     @relation("DrawingPendingWith", fields: [pendingWithPersonId], references: [id])
+  submittedDate       DateTime  @default(now())
+  requiredDate        DateTime?
+  reviewedDate        DateTime?
+  approvedDate        DateTime?
+  rejectionReason     String?
+  reviewerComments    String?
+  revisionNumber      Int       @default(1)
+  revisionLetter      String    @default("A")
+  parentDrawingId     Int?
+  parentDrawing       ShopDrawing?  @relation("DrawingRevisions", fields: [parentDrawingId], references: [id])
+  revisions           ShopDrawing[] @relation("DrawingRevisions")
+  priority            String    @default("MEDIUM")
+  delayDays           Int       @default(0)
+  attachments         DrawingAttachment[]
+  activityLog         DrawingActivity[]
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model DrawingAttachment {
+  id           Int         @id @default(autoincrement())
+  drawingId    Int
+  drawing      ShopDrawing @relation(fields: [drawingId], references: [id])
+  fileName     String
+  fileUrl      String
+  fileType     String
+  version      Int         @default(1)
+  uploadedById Int
+  uploadedBy   User        @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime    @default(now())
+}
+
+model DrawingActivity {
+  id            Int         @id @default(autoincrement())
+  drawingId     Int
+  drawing       ShopDrawing @relation(fields: [drawingId], references: [id])
+  action        String
+  performedById Int
+  performedBy   User        @relation(fields: [performedById], references: [id])
+  notes         String?
+  createdAt     DateTime    @default(now())
 }
