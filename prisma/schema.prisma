@@ -308,6 +308,13 @@ model User {
   shopDrawingsPending           ShopDrawing[]                @relation("DrawingPendingWith")
   drawingAttachments            DrawingAttachment[]
   drawingActivities             DrawingActivity[]
+  deliveriesQCInspected         Delivery[]           @relation("DeliveryQCInspector")
+  deliveriesReceived            Delivery[]           @relation("DeliveryReceivedBy")
+  deliveriesCreated             Delivery[]           @relation("DeliveryCreatedBy")
+  deliveryAttachments           DeliveryAttachment[]
+  deliveryActivities            DeliveryActivity[]
+  projectBudgets                ProjectBudget[]
+  costTransactions              CostTransaction[]
 }
 
 model Role {
@@ -398,6 +405,7 @@ model Vendor {
   documentAlerts            DocumentAlert[]
   materialSubmittals        MaterialSubmittal[]
   shopDrawings              ShopDrawing[]
+  deliveries                Delivery[]
 
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
@@ -1090,6 +1098,7 @@ model PurchaseOrder {
   items                 POItem[]
   ipcs                  IPC[]
   materialSubmittals    MaterialSubmittal[]
+  deliveries            Delivery[]
 }
 
 model POItem {
@@ -1449,4 +1458,111 @@ model DrawingActivity {
   performedBy   User        @relation(fields: [performedById], references: [id])
   notes         String?
   createdAt     DateTime    @default(now())
+}
+
+model Delivery {
+  id                  Int       @id @default(autoincrement())
+  deliveryNumber      String    @unique
+  projectName         String
+  vendorId            Int
+  vendor              Vendor    @relation(fields: [vendorId], references: [id])
+  poId                Int
+  purchaseOrder       PurchaseOrder @relation(fields: [poId], references: [id])
+  deliveryDate        DateTime?
+  requiredDate        DateTime
+  status              String    @default("PENDING")
+  qcStatus            String    @default("PENDING_INSPECTION")
+  qcInspectedById     Int?
+  qcInspectedBy       User?     @relation("DeliveryQCInspector", fields: [qcInspectedById], references: [id])
+  qcInspectedAt       DateTime?
+  qcNotes             String?
+  rejectionReason     String?
+  deliveryLocation    String?
+  receivedById        Int?
+  receivedBy          User?     @relation("DeliveryReceivedBy", fields: [receivedById], references: [id])
+  receivedAt          DateTime?
+  delayDays           Int       @default(0)
+  isPartial           Boolean   @default(false)
+  notes               String?
+  items               DeliveryItem[]
+  attachments         DeliveryAttachment[]
+  activityLog         DeliveryActivity[]
+  createdById         Int
+  createdBy           User      @relation("DeliveryCreatedBy", fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+model DeliveryItem {
+  id                Int       @id @default(autoincrement())
+  deliveryId        Int
+  delivery          Delivery  @relation(fields: [deliveryId], references: [id])
+  poItemId          Int?
+  description       String
+  quantityOrdered   Float
+  quantityDelivered Float
+  unit              String
+  qcStatus          String    @default("PENDING")
+  qcNotes           String?
+  createdAt         DateTime  @default(now())
+}
+
+model DeliveryAttachment {
+  id           Int      @id @default(autoincrement())
+  deliveryId   Int
+  delivery     Delivery @relation(fields: [deliveryId], references: [id])
+  fileName     String
+  fileUrl      String
+  fileType     String
+  uploadedById Int
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model DeliveryActivity {
+  id            Int      @id @default(autoincrement())
+  deliveryId    Int
+  delivery      Delivery @relation(fields: [deliveryId], references: [id])
+  action        String
+  performedById Int
+  performedBy   User     @relation(fields: [performedById], references: [id])
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model ProjectBudget {
+  id               Int      @id @default(autoincrement())
+  projectName      String
+  costCode         String
+  boqDescription   String
+  budgetAmount     Float
+  unit             String?
+  quantity         Float?
+  unitRate         Float?
+  category         String?
+  createdById      Int
+  createdBy        User     @relation(fields: [createdById], references: [id])
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  costTransactions CostTransaction[]
+
+  @@unique([projectName, costCode])
+}
+
+model CostTransaction {
+  id              Int           @id @default(autoincrement())
+  projectBudgetId Int
+  projectBudget   ProjectBudget @relation(fields: [projectBudgetId], references: [id])
+  projectName     String
+  costCode        String
+  transactionType String
+  referenceId     Int?
+  referenceType   String?
+  referenceNumber String?
+  amount          Float
+  description     String?
+  transactionDate DateTime
+  createdById     Int
+  createdBy       User          @relation(fields: [createdById], references: [id])
+  createdAt       DateTime      @default(now())
 }

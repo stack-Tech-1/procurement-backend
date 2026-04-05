@@ -349,6 +349,48 @@ export const updatePOStatus = async (req, res) => {
 
     const updated = await prisma.purchaseOrder.update({ where: { id }, data: updateData });
 
+    // Auto-create cost transactions for budget tracking
+    if (newStatus === 'ISSUED') {
+      try {
+        const poWithItems = await prisma.purchaseOrder.findUnique({ where: { id }, include: { items: true } });
+        for (const item of (poWithItems?.items || [])) {
+          if (!item.costCode || !po.projectName) continue;
+          const budgetLine = await prisma.projectBudget.findUnique({
+            where: { projectName_costCode: { projectName: po.projectName, costCode: item.costCode } },
+          });
+          if (!budgetLine) continue;
+          await prisma.costTransaction.create({
+            data: {
+              projectBudgetId: budgetLine.id, projectName: po.projectName, costCode: item.costCode,
+              transactionType: 'PO_COMMITMENT', referenceId: id, referenceType: 'PO',
+              referenceNumber: po.poNumber, amount: item.totalPrice || 0,
+              description: `PO commitment: ${item.description}`, transactionDate: new Date(),
+              createdById: userId,
+            },
+          });
+        }
+      } catch (txErr) {
+        console.error('CostTransaction (ISSUED) error:', txErr.message); // non-fatal
+      }
+    }
+
+    if (newStatus === 'CANCELLED') {
+      try {
+        const existing = await prisma.costTransaction.findMany({
+          where: { referenceId: id, referenceType: 'PO', transactionType: 'PO_COMMITMENT' },
+        });
+        for (const tx of existing) {
+          const { id: _id, createdAt: _ca, ...rest } = tx;
+          await prisma.costTransaction.create({
+            data: { ...rest, amount: -tx.amount, transactionType: 'ADJUSTMENT',
+              description: `Reversal: PO ${po.poNumber} cancelled`, transactionDate: new Date(), createdById: userId },
+          });
+        }
+      } catch (txErr) {
+        console.error('CostTransaction (CANCELLED) error:', txErr.message); // non-fatal
+      }
+    }
+
     // Audit log for key transitions
     if (['APPROVED', 'ISSUED', 'CANCELLED', 'CLOSED'].includes(newStatus)) {
       await logAudit(userId, `PO_${newStatus}`, 'PurchaseOrder', id, {

@@ -208,6 +208,32 @@ export const updateIPCStatus = async (req, res) => {
       }
     });
 
+    // Auto-create cost transactions for budget tracking
+    if (['APPROVED', 'PAID'].includes(status)) {
+      try {
+        const txType = status === 'APPROVED' ? 'INVOICE' : 'PAYMENT';
+        const budgetLine = await prisma.projectBudget.findFirst({
+          where: { projectName: updated.projectName || '' },
+        });
+        if (budgetLine) {
+          await prisma.costTransaction.create({
+            data: {
+              projectBudgetId: budgetLine.id, projectName: budgetLine.projectName,
+              costCode: budgetLine.costCode, transactionType: txType,
+              referenceId: updated.id, referenceType: 'IPC',
+              referenceNumber: updated.ipcNumber || `IPC-${updated.id}`,
+              amount: updated.netPayable || 0,
+              description: `IPC ${status.toLowerCase()}: ${updated.ipcNumber || updated.id}`,
+              transactionDate: new Date(),
+              createdById: req.user?.id || 1,
+            },
+          });
+        }
+      } catch (txErr) {
+        console.error('CostTransaction (IPC) error:', txErr.message); // non-fatal
+      }
+    }
+
     // Notify the vendor/submitter
     try {
       if (updated.submittedBy?.id) {
