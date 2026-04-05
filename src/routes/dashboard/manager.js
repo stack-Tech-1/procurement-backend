@@ -1,5 +1,7 @@
 import express from "express";
 import prisma from "../../config/prismaClient.js";
+import { cacheForUser, TTL } from "../../middleware/cacheMiddleware.js";
+import { cache } from "../../services/cacheService.js";
 
 const router = express.Router();
 
@@ -37,7 +39,7 @@ async function countPendingApprovals(userId, dateFilter = {}) {
 
 // ─── GET /api/dashboard/manager/kpis ─────────────────────────────────────────
 
-router.get("/kpis", async (req, res) => {
+router.get("/kpis", cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const userId = req.user.id;
     const now = new Date();
@@ -115,7 +117,7 @@ router.get("/kpis", async (req, res) => {
 
 // ─── GET /api/dashboard/manager/charts ───────────────────────────────────────
 
-router.get("/charts", async (req, res) => {
+router.get("/charts", cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const now = new Date();
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -198,7 +200,7 @@ router.get("/charts", async (req, res) => {
 
 // ─── GET /api/dashboard/manager/approval-queue ───────────────────────────────
 
-router.get("/approval-queue", async (req, res) => {
+router.get("/approval-queue", cacheForUser(TTL.SHORT), async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -277,7 +279,7 @@ router.get("/approval-queue", async (req, res) => {
 
 // ─── GET /api/dashboard/manager/critical-deadlines ───────────────────────────
 
-router.get("/critical-deadlines", async (req, res) => {
+router.get("/critical-deadlines", cacheForUser(TTL.SHORT), async (req, res) => {
   try {
     const now = new Date();
     const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);

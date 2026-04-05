@@ -6,6 +6,8 @@ import path from 'path';
 import fs from 'fs';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { authorizeRole } from '../middleware/roleMiddleware.js';
+import { cachePublic, TTL } from '../middleware/cacheMiddleware.js';
+import { cache } from '../services/cacheService.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -47,7 +49,7 @@ async function generateMaterialCode(csiDivision) {
 }
 
 // ─── GET /api/materials/stats ─────────────────────────────────────────────────
-router.get('/stats', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, res) => {
+router.get('/stats', authenticateToken, authorizeRole(OFFICER_PLUS), cachePublic(TTL.LONG), async (req, res) => {
   try {
     const now = new Date();
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
@@ -194,7 +196,7 @@ router.post('/import', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImp
 });
 
 // ─── GET /api/materials ────────────────────────────────────────────────────────
-router.get('/', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, res) => {
+router.get('/', authenticateToken, authorizeRole(OFFICER_PLUS), cachePublic(TTL.VERY_LONG), async (req, res) => {
   try {
     const { search, csiDivision, materialType, hasPrice, validPricesOnly, page = 1, limit = 50 } = req.query;
     const now = new Date();
@@ -249,8 +251,13 @@ router.get('/', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, res)
   }
 });
 
+const invalidateMaterials = (_req, _res, next) => {
+  cache.invalidatePrefix('public:/api/materials');
+  next();
+};
+
 // ─── POST /api/materials ───────────────────────────────────────────────────────
-router.post('/', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImage.single('image'), async (req, res) => {
+router.post('/', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImage.single('image'), invalidateMaterials, async (req, res) => {
   try {
     const { csiCode, csiDivision, materialName, materialNameAr, materialType, unit, standardPrice, currency, defaultVendorId, specs, notes } = req.body;
     if (!materialName) return res.status(400).json({ error: 'materialName is required' });
@@ -285,7 +292,7 @@ router.post('/', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImage.sin
 });
 
 // ─── GET /api/materials/:id/price-history ─────────────────────────────────────
-router.get('/:id/price-history', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, res) => {
+router.get('/:id/price-history', authenticateToken, authorizeRole(OFFICER_PLUS), cachePublic(TTL.LONG), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const entries = await prisma.priceEntry.findMany({
@@ -321,7 +328,7 @@ router.get('/:id/price-history', authenticateToken, authorizeRole(OFFICER_PLUS),
 });
 
 // ─── GET /api/materials/:id/price-comparison ──────────────────────────────────
-router.get('/:id/price-comparison', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, res) => {
+router.get('/:id/price-comparison', authenticateToken, authorizeRole(OFFICER_PLUS), cachePublic(TTL.MEDIUM), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const now = new Date();
@@ -381,7 +388,7 @@ router.get('/:id/price-comparison', authenticateToken, authorizeRole(OFFICER_PLU
 });
 
 // ─── GET /api/materials/:id ───────────────────────────────────────────────────
-router.get('/:id', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, res) => {
+router.get('/:id', authenticateToken, authorizeRole(OFFICER_PLUS), cachePublic(TTL.VERY_LONG), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const material = await prisma.cSI_Material.findUnique({
@@ -405,7 +412,7 @@ router.get('/:id', authenticateToken, authorizeRole(OFFICER_PLUS), async (req, r
 });
 
 // ─── PUT /api/materials/:id ────────────────────────────────────────────────────
-router.put('/:id', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImage.single('image'), async (req, res) => {
+router.put('/:id', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImage.single('image'), invalidateMaterials, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { csiCode, csiDivision, materialName, materialNameAr, materialType, unit, standardPrice, currency, defaultVendorId, specs, notes } = req.body;
@@ -433,7 +440,7 @@ router.put('/:id', authenticateToken, authorizeRole(MANAGER_PLUS), uploadImage.s
 });
 
 // ─── DELETE /api/materials/:id ────────────────────────────────────────────────
-router.delete('/:id', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.delete('/:id', authenticateToken, authorizeRole(MANAGER_PLUS), invalidateMaterials, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const activePrices = await prisma.priceEntry.count({ where: { materialId: id, isActive: true } });

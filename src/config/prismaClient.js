@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client'
 
 // Create Prisma client with connection pool optimization for Supabase
 const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'info', 'warn', 'error'] : ['warn', 'error'],
+  log: process.env.DATABASE_QUERY_LOG === 'true' ? ['query', 'warn', 'error'] : ['warn', 'error'],
   errorFormat: 'minimal',
   datasources: {
     db: {

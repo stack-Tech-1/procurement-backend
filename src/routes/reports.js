@@ -15,16 +15,17 @@ import {
 } from '../controllers/reportController.js';
 
 import { authenticateToken } from '../middleware/authMiddleware.js';
+import { cacheForUser, TTL } from '../middleware/cacheMiddleware.js';
 
 const router = express.Router();
 
-router.get('/templates/categories', authenticateToken, getReportTemplates);
+router.get('/templates/categories', authenticateToken, cacheForUser(TTL.LONG), getReportTemplates);
 
 // Get all reports
-router.get('/', authenticateToken, getReports);
+router.get('/', authenticateToken, cacheForUser(TTL.LONG), getReports);
 
 // Get report by ID
-router.get('/:id', authenticateToken, getReportById);
+router.get('/:id', authenticateToken, cacheForUser(TTL.LONG), getReportById);
 
 // Create new report
 router.post('/', authenticateToken, createReport);

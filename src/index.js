@@ -56,6 +56,7 @@ import newReportRoutes from './routes/reportRoutes.js';
 import userManagementRoutes from './routes/admin/userManagement.js';
 import profileRoutes from './routes/profileRoutes.js';
 import systemSettingsRoutes from './routes/admin/systemSettings.js';
+import cacheAdminRoutes from './routes/admin/cacheRoutes.js';
 import { logAction } from './services/auditService.js';
 import {
   generateVendorMasterListReport,
@@ -136,6 +137,7 @@ app.use('/api/admin/invitations', userManagementRoutes);
 app.use('/api/admin/audit-logs', userManagementRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/admin/settings', systemSettingsRoutes);
+app.use('/api/admin/cache', cacheAdminRoutes);
 
 
 

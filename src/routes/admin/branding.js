@@ -5,6 +5,8 @@ import fs from "fs";
 import prisma from "../../config/prismaClient.js";
 import { authenticateToken } from "../../middleware/authMiddleware.js";
 import { authorizeRole } from "../../middleware/roleMiddleware.js";
+import { cachePublic, TTL } from "../../middleware/cacheMiddleware.js";
+import { cache } from "../../services/cacheService.js";
 
 const ADMIN_ROLE = [1]; // Executive = Admin
 
@@ -64,7 +66,7 @@ async function getSettings() {
 const router = express.Router();
 
 // GET /api/admin/branding — public, no auth needed
-router.get("/", async (_req, res) => {
+router.get("/", cachePublic(TTL.VERY_LONG), async (_req, res) => {
   try {
     const settings = await getSettings();
     res.json(settings);
@@ -99,6 +101,10 @@ router.put("/", authenticateToken, authorizeRole(ADMIN_ROLE), async (req, res) =
     const updated = existing
       ? await prisma.brandingSettings.update({ where: { id: existing.id }, data })
       : await prisma.brandingSettings.create({ data: { ...BRANDING_DEFAULTS, ...data } });
+
+    // Invalidate branding cache
+    cache.invalidatePrefix('public:/api/admin/branding');
+    cache.invalidatePrefix('public:/api/branding');
 
     res.json(updated);
   } catch (error) {

@@ -1,5 +1,6 @@
 // backend/src/controllers/healthController.js
 import prisma from '../config/prismaClient.js';
+import { cache } from '../services/cacheService.js';
 
 export const healthController = {
   
@@ -12,6 +13,7 @@ export const healthController = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         database: 'connected',
+        cache: cache.stats(),
         uptime: process.uptime()
       });
     } catch (error) {

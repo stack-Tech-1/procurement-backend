@@ -20,6 +20,8 @@ import {
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { authorizeRole } from "../middleware/roleMiddleware.js";
 import upload from "../middleware/uploadMiddleware.js";
+import { cacheForUser, cachePublic, TTL } from "../middleware/cacheMiddleware.js";
+import { cache } from "../services/cacheService.js";
 
 const router = express.Router();
 
@@ -49,10 +51,10 @@ router.post("/", createVendor);
 router.get("/me", authenticateToken, getVendor);
 
 // Admin routes
-router.get("/", authenticateToken, getAllVendors);
-router.get("/qualification/me", authenticateToken, getMyQualificationDetails); 
-router.get('/list', authenticateToken, getFilteredVendorList);
-router.get('/stats', authenticateToken, getVendorStats);
+router.get("/", authenticateToken, cacheForUser(TTL.MEDIUM), getAllVendors);
+router.get("/qualification/me", authenticateToken, getMyQualificationDetails);
+router.get('/list', authenticateToken, cacheForUser(TTL.MEDIUM), getFilteredVendorList);
+router.get('/stats', authenticateToken, cacheForUser(TTL.MEDIUM), getVendorStats);
 
 // Vendor qualification update - with file upload
 router.put(
@@ -66,7 +68,7 @@ router.put(
 );
 
 // CR number duplicate check (before /:id to avoid param conflict)
-router.get('/check-cr', authenticateToken, checkCrNumber);
+router.get('/check-cr', authenticateToken, cachePublic(TTL.SHORT), checkCrNumber);
 
 // Document expiry alerts for managers/officers (before /:id to avoid param conflict)
 router.get('/document-alerts', authenticateToken, authorizeRole([1, 2, 3]), getDocumentAlerts);
@@ -80,7 +82,10 @@ router.post('/:id/evaluation/ai', authenticateToken, authorizeRole([1, 2, 3]), r
 router.post('/:id/evaluation/review', authenticateToken, authorizeRole([1, 2, 3]), submitEngineerReview);
 router.post('/:id/qualification/admin-action', authenticateToken, authorizeRole([1, 2, 3]), adminAction);
 
-router.put("/:id", authenticateToken, adminUpdateVendor);
-router.get('/:id', authenticateToken, getVendorDetails);
+router.put("/:id", authenticateToken, (req, res, next) => {
+  cache.invalidatePrefix('route:');
+  next();
+}, adminUpdateVendor);
+router.get('/:id', authenticateToken, cacheForUser(TTL.MEDIUM), getVendorDetails);
 
 export default router;

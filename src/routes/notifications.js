@@ -2,17 +2,18 @@
 import express from 'express';
 import { notificationController } from '../controllers/notificationController.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
+import { cacheForUser, TTL } from '../middleware/cacheMiddleware.js';
 
 const router = express.Router();
 
-// Get user notifications
+// Get user notifications (not cached — always fresh)
 router.get('/', authenticateToken, notificationController.getUserNotifications);
 
 // Get notification statistics
 router.get('/stats', authenticateToken, notificationController.getNotificationStats);
 
-// Fast unread count (registered before /:notificationId to avoid param conflict)
-router.get('/unread-count', authenticateToken, notificationController.getUnreadCount);
+// Fast unread count — short TTL, stale-while-revalidate on frontend
+router.get('/unread-count', authenticateToken, cacheForUser(TTL.SHORT), notificationController.getUnreadCount);
 
 // Mark notification as read
 router.patch('/:notificationId/read', authenticateToken, notificationController.markAsRead);

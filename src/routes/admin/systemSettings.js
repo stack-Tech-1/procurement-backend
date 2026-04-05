@@ -4,6 +4,8 @@ import { authenticateToken } from '../../middleware/authMiddleware.js';
 import { authorizeRole } from '../../middleware/roleMiddleware.js';
 import { logAction } from '../../services/auditService.js';
 import { clearSettingsCache } from '../../utils/getSystemSetting.js';
+import { cachePublic, TTL } from '../../middleware/cacheMiddleware.js';
+import { cache } from '../../services/cacheService.js';
 
 const router = express.Router();
 const requireAdmin = [authenticateToken, authorizeRole([1])];
@@ -49,7 +51,7 @@ async function seedDefaultsIfEmpty() {
 }
 
 // ── GET /api/admin/settings ──────────────────────────────────────────────────
-router.get('/', ...requireAdmin, async (req, res) => {
+router.get('/', ...requireAdmin, cachePublic(TTL.LONG), async (req, res) => {
   try {
     await seedDefaultsIfEmpty();
     const settings = await prisma.systemSetting.findMany({
@@ -120,6 +122,7 @@ router.put('/', ...requireAdmin, async (req, res) => {
     }
 
     clearSettingsCache();
+    cache.invalidatePrefix('public:/api/admin/settings');
 
     const all = await prisma.systemSetting.findMany({
       include: { updatedBy: { select: { id: true, name: true } } },

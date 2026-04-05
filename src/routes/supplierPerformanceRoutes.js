@@ -2,24 +2,21 @@ import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { authorizeRole } from '../middleware/roleMiddleware.js';
+import { cacheForUser, TTL } from '../middleware/cacheMiddleware.js';
+import { cache as appCache } from '../services/cacheService.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 const MANAGER_PLUS = [1, 2];
 
-// ─── In-memory cache ────────────────────────────────────────────────────────
-const cache = new Map();
-const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
-
+// Legacy cache helpers — kept for internal use within complex endpoints
+// Route-level caching is now handled by cacheForUser middleware
 function getCached(key) {
-  const entry = cache.get(key);
-  if (entry && Date.now() < entry.expiry) return entry.data;
-  cache.delete(key);
-  return null;
+  return appCache.get(key) ?? null;
 }
 function setCached(key, data) {
-  cache.set(key, { data, expiry: Date.now() + CACHE_TTL });
+  appCache.set(key, data, TTL.LONG);
 }
 
 // ─── Score & risk helpers ────────────────────────────────────────────────────
@@ -152,7 +149,7 @@ async function buildVendorPerf(vendor, { projectName } = {}) {
 }
 
 // ─── GET /api/supplier-performance/summary ───────────────────────────────────
-router.get('/summary', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.get('/summary', authenticateToken, authorizeRole(MANAGER_PLUS), cacheForUser(TTL.LONG), async (req, res) => {
   try {
     const cacheKey = 'summary';
     const cached = getCached(cacheKey);
@@ -213,7 +210,7 @@ router.get('/summary', authenticateToken, authorizeRole(MANAGER_PLUS), async (re
 });
 
 // ─── GET /api/supplier-performance/comparison?vendorIds=1,2,3 ────────────────
-router.get('/comparison', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.get('/comparison', authenticateToken, authorizeRole(MANAGER_PLUS), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const ids = (req.query.vendorIds || '').split(',').map(id => parseInt(id)).filter(Boolean).slice(0, 5);
     if (ids.length === 0) return res.status(400).json({ error: 'vendorIds required (comma-separated, max 5)' });
@@ -231,7 +228,7 @@ router.get('/comparison', authenticateToken, authorizeRole(MANAGER_PLUS), async 
 });
 
 // ─── GET /api/supplier-performance ───────────────────────────────────────────
-router.get('/', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.get('/', authenticateToken, authorizeRole(MANAGER_PLUS), cacheForUser(TTL.LONG), async (req, res) => {
   try {
     const { class: vendorClass, minScore, projectName, category, sortBy = 'overallScore', page = 1, limit = 50 } = req.query;
     const cacheKey = `list:${vendorClass}:${minScore}:${projectName}:${category}:${sortBy}`;
@@ -272,7 +269,7 @@ router.get('/', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res)
 });
 
 // ─── GET /api/supplier-performance/:vendorId ──────────────────────────────────
-router.get('/:vendorId', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.get('/:vendorId', authenticateToken, authorizeRole(MANAGER_PLUS), cacheForUser(TTL.LONG), async (req, res) => {
   try {
     const vendorId = parseInt(req.params.vendorId);
     const vendor = await prisma.vendor.findUnique({

@@ -8,6 +8,8 @@ import { authenticateToken } from '../middleware/authMiddleware.js';
 import { authorizeRole } from '../middleware/roleMiddleware.js';
 import { notificationService } from '../services/notificationService.js';
 import { logUserAction } from '../services/auditService.js';
+import { cacheForUser, TTL } from '../middleware/cacheMiddleware.js';
+import { cache } from '../services/cacheService.js';
 
 const router = express.Router();
 
@@ -74,7 +76,7 @@ const upload = multer({
 
 // ─── GET /api/submittals/stats ────────────────────────────────────────────────
 
-router.get('/stats', authenticateToken, authorizeRole([1, 2, 3, 4]), async (req, res) => {
+router.get('/stats', authenticateToken, authorizeRole([1, 2, 3, 4]), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const n = now();
     const startOfMonth = new Date(n.getFullYear(), n.getMonth(), 1);
@@ -102,7 +104,7 @@ router.get('/stats', authenticateToken, authorizeRole([1, 2, 3, 4]), async (req,
 
 // ─── GET /api/submittals/dashboard ───────────────────────────────────────────
 
-router.get('/dashboard', authenticateToken, authorizeRole([1, 2, 3, 4]), async (req, res) => {
+router.get('/dashboard', authenticateToken, authorizeRole([1, 2, 3, 4]), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const n = now();
 
@@ -184,7 +186,7 @@ router.get('/dashboard', authenticateToken, authorizeRole([1, 2, 3, 4]), async (
 
 // ─── GET /api/submittals ──────────────────────────────────────────────────────
 
-router.get('/', authenticateToken, authorizeRole([1, 2, 3, 4]), async (req, res) => {
+router.get('/', authenticateToken, authorizeRole([1, 2, 3, 4]), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const { status, projectName, vendorId, assignedReviewerId, priority, overdue, page = 1, pageSize = 20, search } = req.query;
     const n = now();
@@ -246,7 +248,7 @@ router.get('/', authenticateToken, authorizeRole([1, 2, 3, 4]), async (req, res)
 
 // ─── GET /api/submittals/:id ──────────────────────────────────────────────────
 
-router.get('/:id', authenticateToken, authorizeRole([1, 2, 3, 4]), async (req, res) => {
+router.get('/:id', authenticateToken, authorizeRole([1, 2, 3, 4]), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const submittal = await prisma.materialSubmittal.findUnique({ where: { id }, include: submittalInclude });

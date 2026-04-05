@@ -4,6 +4,8 @@ import multer from 'multer';
 import ExcelJS from 'exceljs';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 import { authorizeRole } from '../middleware/roleMiddleware.js';
+import { cacheForUser, TTL } from '../middleware/cacheMiddleware.js';
+import { cache } from '../services/cacheService.js';
 
 const router = express.Router();
 const MANAGER_PLUS = [1, 2];
@@ -35,7 +37,7 @@ async function calcProjectTotals(projectName) {
 
 // ─── GET /summary ─────────────────────────────────────────────────────────────
 
-router.get('/summary', authenticateToken, async (req, res) => {
+router.get('/summary', authenticateToken, cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const budgetRows = await prisma.projectBudget.groupBy({
       by: ['projectName'],
@@ -88,7 +90,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
 
 // ─── GET /projects ────────────────────────────────────────────────────────────
 
-router.get('/projects', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.get('/projects', authenticateToken, authorizeRole(MANAGER_PLUS), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const budgetRows = await prisma.projectBudget.groupBy({
       by: ['projectName'],
@@ -143,7 +145,7 @@ router.get('/transactions/:projectName/:costCode', authenticateToken, async (req
 
 // ─── GET /:projectName ────────────────────────────────────────────────────────
 
-router.get('/:projectName', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.get('/:projectName', authenticateToken, authorizeRole(MANAGER_PLUS), cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const projectName = decodeURIComponent(req.params.projectName);
 
@@ -195,7 +197,10 @@ router.get('/:projectName', authenticateToken, authorizeRole(MANAGER_PLUS), asyn
 
 // ─── POST /projects/:projectName/items ────────────────────────────────────────
 
-router.post('/projects/:projectName/items', authenticateToken, authorizeRole(MANAGER_PLUS), async (req, res) => {
+router.post('/projects/:projectName/items', authenticateToken, authorizeRole(MANAGER_PLUS), (req, res, next) => {
+  cache.invalidatePrefix(`route:${req.user?.id}:/api/budget`);
+  next();
+}, async (req, res) => {
   try {
     const projectName = decodeURIComponent(req.params.projectName);
     const { costCode, boqDescription, budgetAmount, unit, quantity, unitRate, category } = req.body;

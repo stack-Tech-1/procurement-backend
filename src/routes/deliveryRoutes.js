@@ -6,6 +6,7 @@ import { authenticateToken } from '../middleware/authMiddleware.js';
 import { authorizeRole } from '../middleware/roleMiddleware.js';
 import { notificationService } from '../services/notificationService.js';
 import { logUserAction } from '../services/auditService.js';
+import { cacheForUser, TTL } from '../middleware/cacheMiddleware.js';
 
 const router = express.Router();
 const OFFICER_PLUS = [1, 2, 3];
@@ -72,7 +73,7 @@ const deliveryDetailInclude = {
 
 // ─── GET /stats ───────────────────────────────────────────────────────────────
 
-router.get('/stats', authenticateToken, async (req, res) => {
+router.get('/stats', authenticateToken, cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const now = new Date();
     const TERMINAL = ['DELIVERED', 'PARTIALLY_DELIVERED', 'QC_IN_PROGRESS', 'QC_ACCEPTED', 'COMPLETED'];
@@ -102,7 +103,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
 
 // ─── GET /dashboard ───────────────────────────────────────────────────────────
 
-router.get('/dashboard', authenticateToken, async (req, res) => {
+router.get('/dashboard', authenticateToken, cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const now = new Date();
     const TERMINAL = ['DELIVERED', 'PARTIALLY_DELIVERED', 'QC_IN_PROGRESS', 'QC_ACCEPTED', 'COMPLETED'];
@@ -223,7 +224,7 @@ router.get('/vendor/:vendorId', authenticateToken, async (req, res) => {
 
 // ─── GET / ────────────────────────────────────────────────────────────────────
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', authenticateToken, cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const { status, qcStatus, vendorId, poId, projectName, overdue, page = 1, pageSize = 20 } = req.query;
     const now = new Date();
@@ -272,7 +273,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // ─── GET /:id ─────────────────────────────────────────────────────────────────
 
-router.get('/:id', authenticateToken, async (req, res) => {
+router.get('/:id', authenticateToken, cacheForUser(TTL.MEDIUM), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const delivery = await prisma.delivery.findUnique({ where: { id }, include: deliveryDetailInclude });
