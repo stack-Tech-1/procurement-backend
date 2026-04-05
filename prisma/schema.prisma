@@ -315,6 +315,8 @@ model User {
   deliveryActivities            DeliveryActivity[]
   projectBudgets                ProjectBudget[]
   costTransactions              CostTransaction[]
+  csiMaterials                  CSI_Material[]       @relation("MaterialCreatedBy")
+  priceEntriesCreated           PriceEntry[]         @relation("PriceEntryCreatedBy")
 }
 
 model Role {
@@ -471,26 +473,51 @@ model VendorToCategory {
 
 model CSI_Material {
   id              Int          @id @default(autoincrement())
+  materialCode    String?      @unique
   csiCode         String?
+  csiDivision     String?
   name            String
+  materialName    String?
+  materialNameAr  String?
+  materialType    String?
   unit            String?
   defaultVendorId Int?
+  standardPrice   Float?
+  currency        String       @default("SAR")
+  specs           String?
+  imageUrl        String?
+  notes           String?
+  isActive        Boolean      @default(true)
+  createdById     Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  createdBy       User?        @relation("MaterialCreatedBy", fields: [createdById], references: [id])
   defaultVendor   Vendor?      @relation("CSI_MaterialToVendor", fields: [defaultVendorId], references: [id])
   priceEntries    PriceEntry[]
 }
 
 model PriceEntry {
-  id            Int          @id @default(autoincrement())
-  materialId    Int
-  vendorId      Int
-  unitPrice     Float
-  currency      String       @default("NGN")
-  createdAt     DateTime     @default(now())
-  effectiveDate DateTime     @default(now())
-  expiryDate    DateTime?
-  updatedAt     DateTime     @updatedAt
-  material      CSI_Material @relation(fields: [materialId], references: [id])
-  vendor        Vendor       @relation(fields: [vendorId], references: [id])
+  id                  Int          @id @default(autoincrement())
+  materialId          Int
+  vendorId            Int
+  scope               String?
+  unitPrice           Float
+  currency            String       @default("SAR")
+  vatPercent          Float        @default(15)
+  leadTimeDays        Int?
+  validityDate        DateTime?
+  quotationReference  String?
+  quotationFileUrl    String?
+  notes               String?
+  isActive            Boolean      @default(true)
+  effectiveDate       DateTime     @default(now())
+  expiryDate          DateTime?
+  createdById         Int?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  createdBy           User?        @relation("PriceEntryCreatedBy", fields: [createdById], references: [id])
+  material            CSI_Material @relation(fields: [materialId], references: [id])
+  vendor              Vendor       @relation(fields: [vendorId], references: [id])
 }
 
 model RFQ {
