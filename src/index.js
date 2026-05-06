@@ -74,7 +74,7 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: ["https://main.dwotf13xzdq3t.amplifyapp.com", "https://main.d3bob118rkl74z.amplifyapp.com", "http://localhost:3000"], // your frontend's dev URL
+ //origin: ["https://main.dwotf13xzdq3t.amplifyapp.com", "https://main.d3bob118rkl74z.amplifyapp.com", "http://localhost:3000"], // your frontend's dev URL
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
@@ -92,14 +92,14 @@ app.use('/api/branding', (req, res, next) => {
 });
 
 // Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/vendors", vendorRoutes);
-app.use("/api/materials", materialRoutes);
-app.use("/api/price-entries", priceEntryRoutes);
-app.use("/api/rfqs", rfqRoutes);
+//app.use("/api/auth", authRoutes);
+//app.use("/api/admin", adminRoutes);
+//app.use("/api/vendors", vendorRoutes);
+//app.use("/api/materials", materialRoutes);
+//app.use("/api/price-entries", priceEntryRoutes);
+//app.use("/api/rfqs", rfqRoutes);
 app.use("/api/rfqs", rfqComparisonRoutes);
-app.use("/api/users", userRoutes);
+//app.use("/api/users", userRoutes);
 app.use("/api/contracts", contractRoutes);
 app.use("/api/ipcs", ipcRoutes);
 app.use("/api/vendor/qualification", vendorQualificationRoute);
@@ -109,11 +109,11 @@ app.use("/api/vendor", vendorManagementRoute);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/audit', auditRoutes);
 app.use("/api/submissions", submissionRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/health', healthRoutes);
+//app.use('/api/reports', reportRoutes);
+//app.use('/api/dashboard', dashboardRoutes);
+//app.use('/api/notifications', notificationRoutes);
+//app.use('/api/tasks', taskRoutes);
+//app.use('/api/health', healthRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/approvals', approvalWorkflowRoutes);
 app.use('/api/signatures', signatureRoutes);
@@ -133,7 +133,7 @@ app.use('/api/supplier-performance', supplierPerformanceRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/new-reports', newReportRoutes);
 app.use('/api/admin/users', userManagementRoutes);
-app.use('/api/admin/invitations', userManagementRoutes);
+//app.use('/api/admin/invitations', userManagementRoutes);
 app.use('/api/admin/audit-logs', userManagementRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/admin/settings', systemSettingsRoutes);
@@ -141,7 +141,7 @@ app.use('/api/admin/cache', cacheAdminRoutes);
 
 
 
-app.get("/", (req, res) => {
+//app.get("/", (req, res) => {
   res.send("Procurement ERP backend is running 🚀");
 });
 
@@ -208,7 +208,7 @@ app.listen(PORT, async () => {
         });
         for (const sr of due) {
           try {
-            let reportData, subject;
+           // let reportData, subject;
             if (sr.reportType === 'VENDOR_MASTER_LIST') {
               reportData = await generateVendorMasterListReport(sr.filters || {});
               subject = 'KUN ProcureTrack — Vendor Master List Report';
@@ -271,7 +271,7 @@ app.listen(PORT, async () => {
     });
 
     // Daily security automation: runs at 2 AM every day
-    cron.schedule('0 2 * * *', async () => {
+    //cron.schedule('0 2 * * *', async () => {
       console.log('[Cron] Running daily security automation...');
       try {
         const now = new Date();
